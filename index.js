@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 
 const client = new Client({
@@ -13,7 +14,7 @@ client.once(Events.ClientReady, () => {
   console.log(`Bot vibing as ${client.user.tag}`);
 });
 
-// ===== WELCOME SYSTEM =====
+// ================= WELCOME SYSTEM =================
 client.on(Events.GuildMemberAdd, member => {
   const channel = member.guild.systemChannel;
   if (!channel) return;
@@ -24,38 +25,91 @@ Check #verification and choose associate role. No tension 👍`
   );
 });
 
-// ===== MESSAGE SYSTEM =====
-client.on(Events.MessageCreate, message => {
+// ================= MESSAGE SYSTEM =================
+client.on(Events.MessageCreate, async message => {
+
   if (message.author.bot) return;
 
   const content = message.content.toLowerCase();
 
-  // ===== FAQ / SERVER HELP =====
+  // ================= AI MODE (ONLY WHEN TAGGED) =================
+  if (message.mentions.has(client.user)) {
+
+    const userMessage = message.content
+      .replace(`<@${client.user.id}>`, "")
+      .replace(`<@!${client.user.id}>`, "")
+      .trim();
+
+    if (!userMessage) {
+      return message.reply("Haan bolo ser 😌 kya scene hai?");
+    }
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a smart Discord bot in a crypto server. Speak in casual Indian English. Be witty, funny, confident, slightly savage but helpful. Understand crypto culture."
+            },
+            {
+              role: "user",
+              content: userMessage
+            }
+          ]
+        })
+      });
+
+      const data = await response.json();
+      console.log("GROQ RESPONSE:");
+      console.log(JSON.stringify(data, null, 2));
+
+      if (data.choices && data.choices.length > 0) {
+        return message.reply(data.choices[0].message.content);
+      } else {
+        return message.reply("AI thoda confuse ho gaya 😅");
+      }
+
+    } catch (error) {
+      console.error(error);
+      return message.reply("AI server busy lag raha hai 😅");
+    }
+  }
+
+  // ================= FAQ / SERVER HELP =================
   if (content.includes("airdrop") || content.includes("tge"))
-    return message.reply("Airdrop/TGE? Arre chill yaar 😌 2069 confirmed. Patience rakho thoda.");
+    return message.reply("Airdrop/TGE? Arre chill yaar 😌 2069 confirmed.");
 
   if (content.includes("cant send") || content.includes("can't send") || content.includes("raid channel"))
-    return message.reply("Bro pehle verify karlo and associate role pick karo 😄 phir easily message bhej paoge.");
+    return message.reply("Bro pehle verify karlo and associate role pick karo 😄");
 
   if (content.includes("is this legit"))
-    return message.reply("Haan bhai official server hai 😌 No fake DMs, no shady links.");
+    return message.reply("Haan bhai official server hai 😌 No fake DMs.");
 
   if (content.includes("chad") || content.includes("top g") || content.includes("whale") || content.includes("rich"))
-    return message.reply("Chad? Top G? Whale? 😂 Obviously one and only YoungOldman bro.");
+    return message.reply("Chad? Top G? Whale? 😂 Obviously YoungOldman bro.");
 
   if (content.includes("associate role"))
-    return message.reply("Associate role idhar hai 👉 https://discord.com/channels/1343701000174698602/1459156218793951393/1459582869470187642");
+    return message.reply("Associate role 👉 https://discord.com/channels/1343701000174698602/1459156218793951393/1459582869470187642");
 
   if (content.includes("verification") || content.includes("verify"))
-    return message.reply("Verification yahan hota hai 👇 👉 https://discord.com/channels/1343701000174698602/1461261524168605816/1461261526122889419");
+    return message.reply("Verification 👉 https://discord.com/channels/1343701000174698602/1461261524168605816/1461261526122889419");
 
   if (content.includes("morning raid"))
-    return message.reply("Morning raid idhar hota hai 🌅 👉 https://discord.com/channels/1343701000174698602/1409772569556684851");
+    return message.reply("Morning raid 🌅 👉 https://discord.com/channels/1343701000174698602/1409772569556684851");
 
   if (content.includes("evening raid"))
-    return message.reply("Evening raid ka adda yeh hai 🌆 👉 https://discord.com/channels/1343701000174698602/1442484747191320678");
+    return message.reply("Evening raid 🌆 👉 https://discord.com/channels/1343701000174698602/1442484747191320678");
 
-  // ===== BASIC GREETINGS =====
+  // ================= BASIC GREETINGS =================
   if (content === "hi" || content === "hello")
     return message.reply("Yo 👋 I was sleeping but ok.");
 
@@ -74,20 +128,20 @@ client.on(Events.MessageCreate, message => {
   if (content.includes("good night") || content === "gn")
     return message.reply("GN degen 🌙 Portfolio pump ho sapne me.");
 
-  // ===== ROAST MODE =====
+  // ================= ROAST MODE =================
   if (content.includes("roast me")) {
     const roasts = [
       "You type like autocorrect gave up.",
-      "You look like you clap when plane lands.",
       "Main character delusion detected.",
-      "You're not useless… just limited edition."
+      "You clap when plane lands.",
+      "Limited edition human."
     ];
     return message.reply(roasts[Math.floor(Math.random() * roasts.length)]);
   }
 
-  // ===== FLIRTY MODE =====
+  // ================= FLIRTY MODE =================
   if (content.includes("i love you"))
-    return message.reply("I love you too… but slow down tiger 😌");
+    return message.reply("I love you too… slow down tiger 😌");
 
   if (content.includes("kiss me"))
     return message.reply("💋 Virtual kiss delivered.");
@@ -101,7 +155,7 @@ client.on(Events.MessageCreate, message => {
   if (content.includes("good bot"))
     return message.reply("Validation received 😌");
 
-  // ===== CRYPTO MODE =====
+  // ================= CRYPTO MODE =================
   if (content.includes("btc"))
     return message.reply("BTC mentioned 👀 Everyone act normal.");
 
@@ -144,7 +198,7 @@ client.on(Events.MessageCreate, message => {
   if (content.includes("sell now"))
     return message.reply("Sell = pump. Hold = dump.");
 
-  // ===== ETH / L2 CHAOS =====
+  // ================= ETH CHAOS =================
   if (content.includes("gas"))
     return message.reply("Gas fees higher than expectations.");
 
@@ -160,7 +214,7 @@ client.on(Events.MessageCreate, message => {
   if (content.includes("wallet drained"))
     return message.reply("One click and generational wealth gone.");
 
-  // ===== GM CULTURE =====
+  // ================= GM CULTURE =================
   if (content.includes("gm farmers"))
     return message.reply("GM farmers 🌾 Grind hard.");
 
@@ -178,6 +232,7 @@ client.on(Events.MessageCreate, message => {
 
   if (content.includes("market green"))
     return message.reply("Green candles activate ego.");
+
 });
 
 client.login(process.env.TOKEN);
