@@ -1,5 +1,23 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, Events } = require("discord.js");
+const fs = require("fs");
+
+let saveTimeout = null;
+
+function scheduleSave() {
+  if (saveTimeout) return;
+
+  saveTimeout = setTimeout(() => {
+    fs.writeFile(
+      "./personality.json",
+      JSON.stringify(personality, null, 2),
+      (err) => {
+        if (err) console.error("Error saving personality:", err);
+      }
+    );
+    saveTimeout = null;
+  }, 3000);
+}
 
 const client = new Client({
   intents: [
@@ -11,8 +29,24 @@ const client = new Client({
 });
 // 🧠 Memory Store (per server)
 const memory = {};
-const personality = {};
+let personality = {};
 
+try {
+  if (fs.existsSync("./personality.json")) {
+    const data = fs.readFileSync("./personality.json", "utf8");
+    personality = JSON.parse(data);
+    console.log("Personality data loaded.");
+  }
+} catch (err) {
+  console.error("Error loading personality file:", err);
+}
+
+const heat = {};
+const cooldown = {};
+
+// ===== GLOBAL API CONTROL =====
+let activeRequests = 0;
+const MAX_ACTIVE_REQUESTS = 3; // safe limit
 
 client.once(Events.ClientReady, () => {
   console.log(`Bot vibing as ${client.user.tag}`);
@@ -34,13 +68,91 @@ client.on(Events.MessageCreate, async message => {
 
   if (message.author.bot) return;
 
-  const content = message.content.toLowerCase();
+const content = message.content.toLowerCase();
+const guildId = message.guild?.id;
+if (!guildId) return;
+
+// Initialize heat if not exists
+if (!heat[guildId]) {
+  heat[guildId] = 0;
+}
+
+// Increase heat on every message
+heat[guildId]++;
+
+// Decay heat slowly
+setTimeout(() => {
+  if (heat[guildId] > 0) heat[guildId]--;
+}, 15000); // 15 sec decay
+
+// ================= AUTONOMOUS MODE =================
+
+// Chance increases if server active
+const activityLevel = heat[guildId] || 0;
+
+// Base random chance
+let chance = Math.random();
+
+// More active server = more likely to speak
+if (activityLevel > 8) {
+  chance += 0.25;
+}
+if (activityLevel > 15) {
+  chance += 0.25;
+}
+
+// Only react to interesting messages
+let autonomousTrigger = false;
+
+if (
+  chance > 0.85 &&
+  (
+    content.includes("btc") ||
+    content.includes("eth") ||
+    content.includes("pump") ||
+    content.includes("dump") ||
+    content.includes("gm") ||
+    content.includes("gn") ||
+    content.includes("moon") ||
+    content.includes("sad") ||
+    content.includes("love")
+  )
+) {
+  autonomousTrigger = true;
+}
+
+
+// ===== SMART PASSIVE MODE =====
+let passiveChance = 0.03; // very low base
+
+if (heat[guildId] > 8) passiveChance = 0.08;
+if (heat[guildId] > 15) passiveChance = 0.15;
+if (heat[guildId] > 25) passiveChance = 0.22;
+
+const shouldRespond = Math.random() < passiveChance;
+
+
 
  // ================= AI MODE (ONLY WHEN TAGGED) =================
-if (message.mentions.has(client.user)) {
+if (message.mentions.has(client.user) || shouldRespond || autonomousTrigger) {
 
-  const guildId = message.guild.id;
-  const userId = message.author.id;
+const guildId = message.guild.id;
+const userId = message.author.id;
+
+
+// ===== COOLDOWN SYSTEM =====
+if (!cooldown[guildId]) cooldown[guildId] = {};
+
+const now = Date.now();
+const userCooldown = cooldown[guildId][userId] || 0;
+
+// 7 second cooldown per user
+if (now - userCooldown < 7000) return;
+
+cooldown[guildId][userId] = now;
+
+
+
 
 if (!personality[guildId]) {
   personality[guildId] = {};
@@ -49,7 +161,11 @@ if (!personality[guildId]) {
 if (!personality[guildId][userId]) {
   personality[guildId][userId] = {
     vibe: "normal",
-    energy: 0
+    energy: 0,
+    degenScore: 0,
+    emotionalScore: 0,
+    title: "New Spawn",
+    lastActive: Date.now()
   };
 }
 
@@ -141,25 +257,67 @@ else if (mood === "roast") {
   personality[guildId][userId].vibe = "roast";
 }
 
-// ================= ENERGY SYSTEM =================
+// ================= TRAIT & ENERGY SYSTEM =================
+
+const p = personality[guildId][userId];
+
+// Track last active
+p.lastActive = Date.now();
+
+// Energy shifts
 if (mood === "crypto" || mood === "roast") {
-  personality[guildId][userId].energy += 1;
+  p.energy += 1;
 }
 
 if (mood === "supportive") {
-  personality[guildId][userId].energy -= 1;
+  p.energy -= 1;
 }
 
-// Clamp energy between -3 and +3
-if (personality[guildId][userId].energy > 3) {
-  personality[guildId][userId].energy = 3;
+// Long-term trait scoring
+if (mood === "crypto") {
+  p.degenScore += 1;
 }
-if (personality[guildId][userId].energy < -3) {
-  personality[guildId][userId].energy = -3;
+
+if (mood === "supportive") {
+  p.emotionalScore += 1;
 }
+
+// Clamp energy between -5 and +5
+if (p.energy > 5) p.energy = 5;
+if (p.energy < -5) p.energy = -5;
+
+// ================= TITLE EVOLUTION =================
+
+if (p.degenScore > 20) {
+  p.title = "Certified Degen";
+}
+else if (p.emotionalScore > 20) {
+  p.title = "Emotional Investor";
+}
+else if (p.energy >= 4) {
+  p.title = "Hype Beast";
+}
+else if (p.energy <= -4) {
+  p.title = "Existential Trader";
+}
+else {
+  p.title = "Market Participant";
+}
+
+// ================= SAVE PERSONALITY =================
+
+scheduleSave();
 
 
     try {
+
+// ===== GLOBAL API THROTTLE =====
+if (activeRequests >= MAX_ACTIVE_REQUESTS) {
+  return; // silently ignore if overloaded
+}
+
+activeRequests++;
+
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -180,6 +338,9 @@ You are a Discord bot inside a crypto server.
 Current mood context: ${mood}
 User personality vibe: ${personality[guildId][userId].vibe}
 User energy level: ${personality[guildId][userId].energy}
+User title: ${personality[guildId][userId].title}
+User degen score: ${personality[guildId][userId].degenScore}
+User emotional score: ${personality[guildId][userId].emotionalScore}
 Randomness factor: ${randomStyle}
 
 Energy rules:
@@ -224,7 +385,8 @@ Keep replies human, crisp, and natural.
       console.log("GROQ RESPONSE:");
       console.log(JSON.stringify(data, null, 2));
 
-      if (data.choices && data.choices.length > 0) {
+      if (data?.choices?.[0]?.message?.content)
+ {
 
       let botReply = data.choices[0].message.content;
 
@@ -265,7 +427,10 @@ if (memory[guildId][userId].length > 6) {
   } catch (error) {
     console.error(error);
     return message.reply("AI server busy lag raha hai 😅");
-  }
+   } finally {
+  activeRequests--;
+}
+
 
 } // ← this closes AI MODE properly
 
