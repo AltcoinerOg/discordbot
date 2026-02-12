@@ -9,6 +9,10 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+// 🧠 Memory Store (per server)
+const memory = {};
+const personality = {};
+
 
 client.once(Events.ClientReady, () => {
   console.log(`Bot vibing as ${client.user.tag}`);
@@ -32,17 +36,128 @@ client.on(Events.MessageCreate, async message => {
 
   const content = message.content.toLowerCase();
 
-  // ================= AI MODE (ONLY WHEN TAGGED) =================
-  if (message.mentions.has(client.user)) {
+ // ================= AI MODE (ONLY WHEN TAGGED) =================
+if (message.mentions.has(client.user)) {
 
-    const userMessage = message.content
-      .replace(`<@${client.user.id}>`, "")
-      .replace(`<@!${client.user.id}>`, "")
-      .trim();
+  const guildId = message.guild.id;
+  const userId = message.author.id;
 
-    if (!userMessage) {
-      return message.reply("Haan bolo ser 😌 kya scene hai?");
-    }
+if (!personality[guildId]) {
+  personality[guildId] = {};
+}
+
+if (!personality[guildId][userId]) {
+  personality[guildId][userId] = {
+    vibe: "normal",
+    energy: 0
+  };
+}
+
+
+
+
+if (!memory[guildId]) {
+  memory[guildId] = {};
+}
+
+if (!memory[guildId][userId]) {
+  memory[guildId][userId] = [];
+}
+
+  const userMessage = message.content
+    .replace(`<@${client.user.id}>`, "")
+    .replace(`<@!${client.user.id}>`, "")
+    .trim();
+
+if (!userMessage) {
+  return message.reply("Haan bolo ser 😌 kya scene hai?");
+}
+
+// Save user message into memory
+if (userMessage.length > 2) {
+  memory[guildId][userId].push({
+    role: "user",
+    content: userMessage
+  });
+
+if (memory[guildId][userId].length > 6) {
+  memory[guildId][userId].shift();
+}
+}
+
+   const input = userMessage.toLowerCase();
+let mood = "normal";
+const randomStyle = Math.random();
+
+if (
+  input.includes("sad") ||
+  input.includes("lost") ||
+  input.includes("down") ||
+  input.includes("tired") ||
+  input.includes("depressed")
+) {
+  mood = "supportive";
+}
+
+else if (
+  input.includes("btc") ||
+  input.includes("eth") ||
+  input.includes("pump") ||
+  input.includes("dump") ||
+  input.includes("market")
+) {
+  mood = "crypto";
+}
+
+else if (
+  input.includes("love") ||
+  input.includes("cute") ||
+  input.includes("hot") ||
+  input.includes("date") ||
+  input.includes("flirt")
+) {
+  mood = "flirty";
+}
+
+else if (
+  input.includes("roast") ||
+  input.includes("ugly") ||
+  input.includes("loser")
+) {
+  mood = "roast";
+}
+
+// ================= PERSONALITY UPDATE =================
+if (mood === "flirty") {
+  personality[guildId][userId].vibe = "flirty";
+}
+else if (mood === "crypto") {
+  personality[guildId][userId].vibe = "degen";
+}
+else if (mood === "supportive") {
+  personality[guildId][userId].vibe = "emotional";
+}
+else if (mood === "roast") {
+  personality[guildId][userId].vibe = "roast";
+}
+
+// ================= ENERGY SYSTEM =================
+if (mood === "crypto" || mood === "roast") {
+  personality[guildId][userId].energy += 1;
+}
+
+if (mood === "supportive") {
+  personality[guildId][userId].energy -= 1;
+}
+
+// Clamp energy between -3 and +3
+if (personality[guildId][userId].energy > 3) {
+  personality[guildId][userId].energy = 3;
+}
+if (personality[guildId][userId].energy < -3) {
+  personality[guildId][userId].energy = -3;
+}
+
 
     try {
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -53,17 +168,54 @@ client.on(Events.MessageCreate, async message => {
         },
         body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
+        temperature: 0.8,
+        max_tokens: 60,
 
           messages: [
             {
-              role: "system",
-              content:
-                "You are a smart Discord bot in a crypto server. Speak in casual Indian English. Be witty, funny, confident, slightly savage but helpful. Understand crypto culture."
+        role: "system",
+        content: `
+You are a Discord bot inside a crypto server.
+
+Current mood context: ${mood}
+User personality vibe: ${personality[guildId][userId].vibe}
+User energy level: ${personality[guildId][userId].energy}
+Randomness factor: ${randomStyle}
+
+Energy rules:
+- If energy is +2 or +3 → very hype, confident, chaotic degen energy.
+- If energy is 0 → balanced normal tone.
+- If energy is -2 or -3 → calm, soft, emotionally supportive tone.
+
+
+
+Personality:
+- Reply in maximum 2 short sentences.
+- Casual Indian English.
+- Sharp, witty, confident.
+- Never sound like AI.
+- No long explanations.
+- No paragraphs.
+- No corporate tone.
+
+Mood logic:
+- If crypto topic → degen energy.
+- If user sad → calm and supportive.
+- If flirting → playful and smooth.
+- If roasting → roast lightly back.
+- If flexing → tease confidently.
+- If serious question → answer short and clear.
+
+Style rules:
+- If Randomness factor < 0.3 → slightly sarcastic.
+- If between 0.3–0.6 → playful.
+- If above 0.6 → calm confident.
+
+
+Keep replies human, crisp, and natural.
+`
             },
-            {
-              role: "user",
-              content: userMessage
-            }
+           ...memory[guildId][userId]
           ]
         })
       });
@@ -73,16 +225,50 @@ client.on(Events.MessageCreate, async message => {
       console.log(JSON.stringify(data, null, 2));
 
       if (data.choices && data.choices.length > 0) {
-        return message.reply(data.choices[0].message.content);
-      } else {
-        return message.reply("AI thoda confuse ho gaya 😅");
-      }
 
-    } catch (error) {
-      console.error(error);
-      return message.reply("AI server busy lag raha hai 😅");
+      let botReply = data.choices[0].message.content;
+
+// ===== CHAOS CONTROL FILTER =====
+
+// Limit emojis (max 2)
+botReply = botReply.replace(/([\u{1F300}-\u{1FAFF}])/gu, (match, p1, offset, string) => {
+  const emojiCount = (string.match(/[\u{1F300}-\u{1FAFF}]/gu) || []).length;
+  return emojiCount > 2 ? "" : match;
+});
+
+// Remove repeated exclamation spam
+botReply = botReply.replace(/!{2,}/g, "!");
+
+// Trim overly long replies just in case
+if (botReply.length > 180) {
+  botReply = botReply.slice(0, 180);
+}
+
+
+     memory[guildId][userId].push({
+  role: "assistant",
+  content: botReply
+});
+
+if (memory[guildId][userId].length > 6) {
+  memory[guildId][userId].shift();
+}
+
+
+
+      return message.reply(botReply);
+
+    } else {
+      return message.reply("AI thoda confuse ho gaya 😅");
     }
+
+  } catch (error) {
+    console.error(error);
+    return message.reply("AI server busy lag raha hai 😅");
   }
+
+} // ← this closes AI MODE properly
+
 
   // ================= FAQ / SERVER HELP =================
   if (content.includes("airdrop") || content.includes("tge"))
