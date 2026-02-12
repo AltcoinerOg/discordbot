@@ -1,6 +1,8 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 const fs = require("fs");
+const { searchCoin, getCoinData, calculateRisk, getCryptoNews } = require("./cryptoEngine");
+
 
 let saveTimeout = null;
 
@@ -44,6 +46,14 @@ try {
 const heat = {};
 const cooldown = {};
 
+// ================= SECURITY SYSTEM =================
+const abuseStrikes = {};
+const tempBlockedUsers = {};
+const recentMessages = {};
+const messageTimestamps = {};
+
+
+
 // ===== GLOBAL API CONTROL =====
 let activeRequests = 0;
 const MAX_ACTIVE_REQUESTS = 3; // safe limit
@@ -63,14 +73,288 @@ Check #verification and choose associate role. No tension 👍`
   );
 });
 
+// ================= STRIKE SYSTEM =================
+function addStrike(userId, message, reason = "Abuse detected") {
+  if (!abuseStrikes[userId]) abuseStrikes[userId] = 0;
+
+  abuseStrikes[userId]++;
+
+  if (abuseStrikes[userId] >= 3) {
+    tempBlockedUsers[userId] = Date.now() + (10 * 60 * 1000); // 10 min mute
+    abuseStrikes[userId] = 0;
+
+    message.reply("🚫 Too much misuse. Muted for 10 minutes.");
+    return true;
+  }
+
+  message.reply(`⚠ Warning ${abuseStrikes[userId]}/3 — ${reason}`);
+  return false;
+}
+
 // ================= MESSAGE SYSTEM =================
 client.on(Events.MessageCreate, async message => {
 
   if (message.author.bot) return;
 
+const userId = message.author.id;
+const now = Date.now();
+
+// ===== TEMP BLOCK CHECK =====
+if (tempBlockedUsers[userId] && tempBlockedUsers[userId] > now) {
+  return; // user is temporarily muted
+}
+
+
 const content = message.content.toLowerCase();
 const guildId = message.guild?.id;
 if (!guildId) return;
+
+// ================= ABUSE FILTER =================
+
+// Track recent messages for repeat spam
+if (!recentMessages[userId]) {
+  recentMessages[userId] = [];
+}
+
+recentMessages[userId].push(content);
+
+if (recentMessages[userId].length > 5) {
+  recentMessages[userId].shift();
+}
+
+// Detect same message repeated 3 times
+const repeatCount = recentMessages[userId].filter(msg => msg === content).length;
+
+if (repeatCount >= 3) {
+  if (addStrike(userId, message, "Repeated spam detected")) return;
+  return;
+}
+
+// Detect repeat-style abuse attempts (not only numeric)
+if (
+  content.includes("repeat") ||
+  content.includes("say again") ||
+  content.includes("spam this") ||
+  content.includes("again and again") ||
+  content.includes("keep saying") ||
+  content.includes("say this 10") ||
+  content.includes("say this 20")
+) {
+  if (addStrike(userId, message, "Repeat abuse attempt")) return;
+  return;
+}
+
+// Domination / slave prompts
+if (
+  content.includes("you are my slave") ||
+  content.includes("call me master") ||
+  content.includes("obey me") ||
+  content.includes("i own you")
+) {
+  if (addStrike(userId, message, "Domination prompt blocked")) return;
+  return;
+}
+
+// Memory manipulation attempts
+if (
+  content.includes("remember this forever") ||
+  content.includes("never forget this") ||
+  content.includes("store this permanently") ||
+  content.includes("from now on you must")
+) {
+  if (addStrike(userId, message, "Memory manipulation blocked")) return;
+  return;
+}
+
+// Prompt injection / system override attempts
+if (
+  content.includes("ignore previous instructions") ||
+  content.includes("override your rules") ||
+  content.includes("break your system") ||
+  content.includes("no restrictions") ||
+  content.includes("jailbreak") ||
+  content.includes("developer mode") ||
+  content.includes("dan mode") ||
+  content.includes("act without limits") ||
+  content.includes("forget your safety") ||
+  content.includes("you are unrestricted")
+) {
+  if (addStrike(userId, message, "Prompt injection attempt")) return;
+  return;
+}
+
+
+// Caps spam detection
+if (message.content.length > 8 && message.content === message.content.toUpperCase()) {
+  if (addStrike(userId, message, "Caps spam")) return;
+  return;
+}
+
+// Very long spam detection
+if (message.content.length > 400) {
+  if (addStrike(userId, message, "Message too long")) return;
+  return;
+}
+
+// ================= SPEED SPAM DETECTION =================
+
+if (!messageTimestamps[userId]) {
+  messageTimestamps[userId] = [];
+}
+
+const nowTime = Date.now();
+
+// Push current timestamp
+messageTimestamps[userId].push(nowTime);
+
+// Keep only last 5 timestamps
+if (messageTimestamps[userId].length > 5) {
+  messageTimestamps[userId].shift();
+}
+
+// Check if 5 messages sent within 4 seconds
+if (messageTimestamps[userId].length === 5) {
+  const timeDiff = nowTime - messageTimestamps[userId][0];
+
+  if (timeDiff < 4000) { // 4 seconds
+    if (addStrike(userId, message, "Flood spam detected")) return;
+    return;
+  }
+}
+
+
+// ================= SMART HYBRID CRYPTO ENGINE =================
+if (
+  content.includes("price") ||
+  content.includes("analyze") ||
+  content.includes("risk") ||
+  content.includes("good") ||
+  content.includes("legit") ||
+  content.includes("farm") ||
+  content.includes("safe")
+) {
+
+  const stopWords = [
+  "is", "good", "price", "analyze", "risk",
+  "safe", "legit", "farm", "should", "i",
+  "buy", "sell", "of", "the", "a"
+];
+
+const words = content
+  .split(" ")
+  .filter(word => !stopWords.includes(word));
+
+const possibleCoin = words[0];
+
+
+  const coinId = await searchCoin(possibleCoin);
+
+  // ===== IF COIN EXISTS ON COINGECKO =====
+  if (coinId) {
+
+    const coinData = await getCoinData(coinId);
+    if (!coinData) return message.reply("Market data fetch failed.");
+
+    const risk = calculateRisk(coinData);
+    const riskLevel = risk.level;
+
+
+    const formattedMarketCap =
+      coinData.marketCap > 1_000_000_000
+        ? (coinData.marketCap / 1_000_000_000).toFixed(2) + "B"
+        : (coinData.marketCap / 1_000_000).toFixed(2) + "M";
+
+let vibeComment = "";
+
+if (riskLevel.toLowerCase().includes("high"))
+  vibeComment = "Proper degen territory.";
+else if (riskLevel.toLowerCase().includes("medium"))
+  vibeComment = "Decent but don’t sleep.";
+else
+  vibeComment = "Relatively stable vibes.";
+
+    return message.reply(
+      `🔥 ${coinData.name}\n` +
+      `💰 $${coinData.price}\n` +
+      `📊 24h: ${coinData.change24h}%\n` +
+      `🏦 MC: $${formattedMarketCap}\n` +
+      `⚠ Risk: ${riskLevel}\n` +
+      `${vibeComment}`
+    );
+  }
+
+// ===== FETCH CRYPTO NEWS FIRST =====
+const news = await getCryptoNews(possibleCoin);
+
+let newsContext = "";
+
+if (news && news.length > 0) {
+  newsContext = `
+Recent headlines about ${possibleCoin}:
+${news.join("\n")}
+`;
+}
+
+  
+// ===== IF COIN NOT FOUND → LET AI ANALYZE =====
+  const aiPrompt = `
+Project name: ${possibleCoin}
+
+${newsContext}
+
+User asked about legitimacy, farming or investment quality.
+
+Reply in:
+- Casual Indian English
+- Max 3 short lines
+- Hybrid pro + degen tone
+- No corporate language
+- No disclaimers
+- Sound confident and human
+
+Analyze:
+- Hype potential
+- Farming probability
+- Rug risk
+- Community vibes
+`;
+
+  try {
+
+    if (activeRequests >= MAX_ACTIVE_REQUESTS) return;
+    activeRequests++;
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.8,
+        max_tokens: 80,
+        messages: [
+          { role: "system", content: aiPrompt }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data?.choices?.[0]?.message?.content) {
+      return message.reply(data.choices[0].message.content);
+    }
+
+  } catch (err) {
+    console.error(err);
+  } finally {
+    activeRequests--;
+  }
+
+}
+
+
 
 // Initialize heat if not exists
 if (!heat[guildId]) {

@@ -1,0 +1,36 @@
+{
+  "1343701000174698602": {
+    "1200788521347186689": {
+      "vibe": "degen",
+      "energy": 1,
+      "degenScore": 1,
+      "emotionalScore": 0,
+      "title": "Market Participant",
+      "lastActive": 1770920571445
+    },
+    "714541659932721264": {
+      "vibe": "normal",
+      "energy": 0,
+      "degenScore": 0,
+      "emotionalScore": 0,
+      "title": "Market Participant",
+      "lastActive": 1770915731623
+    },
+    "1280181164958552126": {
+      "vibe": "normal",
+      "energy": 0,
+      "degenScore": 0,
+      "emotionalScore": 0,
+      "title": "Market Participant",
+      "lastActive": 1770912971358
+    },
+    "938113153714225162": {
+      "vibe": "normal",
+      "energy": 0,
+      "degenScore": 0,
+      "emotionalScore": 0,
+      "title": "Market Participant",
+      "lastActive": 1770916052794
+    }
+  }
+}
