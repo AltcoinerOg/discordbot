@@ -11,10 +11,10 @@ const { buildSystemPrompt } = require("./core/promptBuilder");
 // ===== RAID CONFIG =====
 const MORNING_CHANNEL_ID = "1409772569556684851";
 const EVENING_CHANNEL_ID = "1442484747191320678";
-const ASSOCIATE_ROLE_ID = "1470973703574655039";
+const ASSOCIATE_ROLE_ID = "1459120132235329536";
 
 
-let raidState = {
+let raidState = {       
   active: false,
   channelId: null,
   links: 0
