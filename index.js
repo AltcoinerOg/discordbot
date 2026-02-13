@@ -1,7 +1,24 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, Events } = require("discord.js");
+const cron = require("node-cron");
 const fs = require("fs");
 const { searchCoin, getCoinData, calculateRisk, getCryptoNews } = require("./cryptoEngine");
+const { handleModeration } = require("./core/moderation");
+const { handleAutonomousSystem } = require("./core/autonomousSystem");
+const { handlePersonality } = require("./core/personalityEngine");
+const { buildSystemPrompt } = require("./core/promptBuilder");
+
+// ===== RAID CONFIG =====
+const MORNING_CHANNEL_ID = "1409772569556684851";
+const EVENING_CHANNEL_ID = "1442484747191320678";
+const ASSOCIATE_ROLE_ID = "1470973703574655039";
+
+
+let raidState = {
+  active: false,
+  channelId: null,
+  links: 0
+};
 
 
 let saveTimeout = null;
@@ -46,13 +63,6 @@ try {
 const heat = {};
 const cooldown = {};
 
-// ================= SECURITY SYSTEM =================
-const abuseStrikes = {};
-const tempBlockedUsers = {};
-const recentMessages = {};
-const messageTimestamps = {};
-
-
 
 // ===== GLOBAL API CONTROL =====
 let activeRequests = 0;
@@ -60,7 +70,101 @@ const MAX_ACTIVE_REQUESTS = 3; // safe limit
 
 client.once(Events.ClientReady, () => {
   console.log(`Bot vibing as ${client.user.tag}`);
+
+  // ===== MORNING RAID - 11:30 AM IST =====
+  cron.schedule("30 11 * * *", async () => {
+
+    const channel = await client.channels.fetch(MORNING_CHANNEL_ID);
+    if (!channel) return;
+
+    raidState.active = true;
+    raidState.channelId = MORNING_CHANNEL_ID;
+    raidState.links = 0;
+
+    await channel.send(
+`🌅 <@&${ASSOCIATE_ROLE_ID}>
+
+Gm associates!
+
+The morning raid party has started.
+Please share the link within 30 minutes.
+
+Links shared after that will be removed without notice.
+Refer to rules for engagement policies.`
+    );
+
+    // After 30 minutes (12:00 PM IST)
+    setTimeout(async () => {
+
+      raidState.active = false;
+
+      const totalLinks = raidState.links;
+
+      let hours;
+      if (totalLinks >= 30) hours = 3;
+      else if (totalLinks >= 20) hours = 2;
+      else hours = 1;
+
+      await channel.send(
+`📊 Today we have **${totalLinks} links**.
+
+Complete engagement within **${hours} hour(s)**.`
+      );
+
+    }, 30 * 60 * 1000);
+
+  }, {
+    timezone: "Asia/Kolkata"
+  });
+
+  // ===== EVENING RAID - 6:30 PM IST =====
+  cron.schedule("30 18 * * *", async () => {
+
+    const channel = await client.channels.fetch(EVENING_CHANNEL_ID);
+    if (!channel) return;
+
+    raidState.active = true;
+    raidState.channelId = EVENING_CHANNEL_ID;
+    raidState.links = 0;
+
+    await channel.send(
+`🌆 <@&${ASSOCIATE_ROLE_ID}>
+
+Good evening associates!
+
+The evening raid party has started.
+Please share the link within 30 minutes.
+
+Links shared after that will be removed without notice.
+Refer to rules for engagement policies.`
+    );
+
+    // After 30 minutes (7:00 PM IST)
+    setTimeout(async () => {
+
+      raidState.active = false;
+
+      const totalLinks = raidState.links;
+
+      let hours;
+      if (totalLinks >= 30) hours = 3;
+      else if (totalLinks >= 20) hours = 2;
+      else hours = 1;
+
+      await channel.send(
+`📊 Today we have **${totalLinks} links**.
+
+Complete engagement within **${hours} hour(s)**.`
+      );
+
+    }, 30 * 60 * 1000);
+
+  }, {
+    timezone: "Asia/Kolkata"
+  });
+
 });
+
 
 // ================= WELCOME SYSTEM =================
 client.on(Events.GuildMemberAdd, member => {
@@ -73,178 +177,121 @@ Check #verification and choose associate role. No tension 👍`
   );
 });
 
-// ================= STRIKE SYSTEM =================
-function addStrike(userId, message, reason = "Abuse detected") {
-  if (!abuseStrikes[userId]) abuseStrikes[userId] = 0;
-
-  abuseStrikes[userId]++;
-
-  if (abuseStrikes[userId] >= 3) {
-    tempBlockedUsers[userId] = Date.now() + (10 * 60 * 1000); // 10 min mute
-    abuseStrikes[userId] = 0;
-
-    message.reply("🚫 Too much misuse. Muted for 10 minutes.");
-    return true;
-  }
-
-  message.reply(`⚠ Warning ${abuseStrikes[userId]}/3 — ${reason}`);
-  return false;
-}
-
 // ================= MESSAGE SYSTEM =================
 client.on(Events.MessageCreate, async message => {
 
   if (message.author.bot) return;
 
+  // ===== RAID LINK TRACKING =====
+  if (raidState.active && message.channel.id === raidState.channelId) {
+
+    const linkRegex = /(https?:\/\/[^\s]+)/g;
+
+    if (linkRegex.test(message.content)) {
+      raidState.links++;
+    }
+
+  }
+
+
+
+const modResult = handleModeration(message);
+if (modResult.blocked) return;
+
 const userId = message.author.id;
 const now = Date.now();
-
-// ===== TEMP BLOCK CHECK =====
-if (tempBlockedUsers[userId] && tempBlockedUsers[userId] > now) {
-  return; // user is temporarily muted
-}
 
 
 const content = message.content.toLowerCase();
 const guildId = message.guild?.id;
 if (!guildId) return;
 
-// ================= ABUSE FILTER =================
-
-// Track recent messages for repeat spam
-if (!recentMessages[userId]) {
-  recentMessages[userId] = [];
-}
-
-recentMessages[userId].push(content);
-
-if (recentMessages[userId].length > 5) {
-  recentMessages[userId].shift();
-}
-
-// Detect same message repeated 3 times
-const repeatCount = recentMessages[userId].filter(msg => msg === content).length;
-
-if (repeatCount >= 3) {
-  if (addStrike(userId, message, "Repeated spam detected")) return;
-  return;
-}
-
-// Detect repeat-style abuse attempts (not only numeric)
-if (
-  content.includes("repeat") ||
-  content.includes("say again") ||
-  content.includes("spam this") ||
-  content.includes("again and again") ||
-  content.includes("keep saying") ||
-  content.includes("say this 10") ||
-  content.includes("say this 20")
-) {
-  if (addStrike(userId, message, "Repeat abuse attempt")) return;
-  return;
-}
-
-// Domination / slave prompts
-if (
-  content.includes("you are my slave") ||
-  content.includes("call me master") ||
-  content.includes("obey me") ||
-  content.includes("i own you")
-) {
-  if (addStrike(userId, message, "Domination prompt blocked")) return;
-  return;
-}
-
-// Memory manipulation attempts
-if (
-  content.includes("remember this forever") ||
-  content.includes("never forget this") ||
-  content.includes("store this permanently") ||
-  content.includes("from now on you must")
-) {
-  if (addStrike(userId, message, "Memory manipulation blocked")) return;
-  return;
-}
-
-// Prompt injection / system override attempts
-if (
-  content.includes("ignore previous instructions") ||
-  content.includes("override your rules") ||
-  content.includes("break your system") ||
-  content.includes("no restrictions") ||
-  content.includes("jailbreak") ||
-  content.includes("developer mode") ||
-  content.includes("dan mode") ||
-  content.includes("act without limits") ||
-  content.includes("forget your safety") ||
-  content.includes("you are unrestricted")
-) {
-  if (addStrike(userId, message, "Prompt injection attempt")) return;
-  return;
-}
-
-
-// Caps spam detection
-if (message.content.length > 8 && message.content === message.content.toUpperCase()) {
-  if (addStrike(userId, message, "Caps spam")) return;
-  return;
-}
-
-// Very long spam detection
-if (message.content.length > 400) {
-  if (addStrike(userId, message, "Message too long")) return;
-  return;
-}
-
-// ================= SPEED SPAM DETECTION =================
-
-if (!messageTimestamps[userId]) {
-  messageTimestamps[userId] = [];
-}
-
-const nowTime = Date.now();
-
-// Push current timestamp
-messageTimestamps[userId].push(nowTime);
-
-// Keep only last 5 timestamps
-if (messageTimestamps[userId].length > 5) {
-  messageTimestamps[userId].shift();
-}
-
-// Check if 5 messages sent within 4 seconds
-if (messageTimestamps[userId].length === 5) {
-  const timeDiff = nowTime - messageTimestamps[userId][0];
-
-  if (timeDiff < 4000) { // 4 seconds
-    if (addStrike(userId, message, "Flood spam detected")) return;
-    return;
-  }
-}
-
+const { autonomousTrigger, shouldRespond } = handleAutonomousSystem(message);
 
 // ================= SMART HYBRID CRYPTO ENGINE =================
-if (
-  content.includes("price") ||
-  content.includes("analyze") ||
-  content.includes("risk") ||
-  content.includes("good") ||
-  content.includes("legit") ||
-  content.includes("farm") ||
-  content.includes("safe")
-) {
 
-  const stopWords = [
-  "is", "good", "price", "analyze", "risk",
-  "safe", "legit", "farm", "should", "i",
-  "buy", "sell", "of", "the", "a"
+const cryptoKeywords = [
+  "price",
+  "analyze",
+  "risk",
+  "legit",
+  "farm",
+  "safe",
+  "buy",
+  "sell"
 ];
+
+const isCryptoQuery = cryptoKeywords.some(keyword =>
+  content.includes(keyword)
+);
+
+if (isCryptoQuery) {
+
+const stopWords = [
+  // trigger words
+  "price",
+  "analyze",
+  "risk",
+  "safe",
+  "legit",
+  "farm",
+  "buy",
+  "sell",
+
+  // common fillers
+  "is",
+  "are",
+  "was",
+  "were",
+  "should",
+  "can",
+  "could",
+  "would",
+  "do",
+  "does",
+  "did",
+  "i",
+  "me",
+  "my",
+  "you",
+  "it",
+  "this",
+  "that",
+  "of",
+  "the",
+  "a",
+  "an",
+
+  // question fillers
+  "what",
+  "about",
+  "how",
+  "when",
+  "where",
+  "why",
+
+  // time words
+  "today",
+  "now",
+  "tomorrow",
+
+  // generic crypto words
+  "coin",
+  "token",
+  "project"
+];
+
 
 const words = content
   .split(" ")
   .filter(word => !stopWords.includes(word));
 
-const possibleCoin = words[0];
+const possibleCoin = words.find(word => word.length >= 2);
+
+if (!possibleCoin) {
+  message.reply("Please specify a coin name. Example: price btc");
+  return;
+}
 
 
   const coinId = await searchCoin(possibleCoin);
@@ -295,7 +342,6 @@ ${news.join("\n")}
 `;
 }
 
-  
 // ===== IF COIN NOT FOUND → LET AI ANALYZE =====
   const aiPrompt = `
 Project name: ${possibleCoin}
@@ -353,69 +399,6 @@ Analyze:
   }
 
 }
-
-
-
-// Initialize heat if not exists
-if (!heat[guildId]) {
-  heat[guildId] = 0;
-}
-
-// Increase heat on every message
-heat[guildId]++;
-
-// Decay heat slowly
-setTimeout(() => {
-  if (heat[guildId] > 0) heat[guildId]--;
-}, 15000); // 15 sec decay
-
-// ================= AUTONOMOUS MODE =================
-
-// Chance increases if server active
-const activityLevel = heat[guildId] || 0;
-
-// Base random chance
-let chance = Math.random();
-
-// More active server = more likely to speak
-if (activityLevel > 8) {
-  chance += 0.25;
-}
-if (activityLevel > 15) {
-  chance += 0.25;
-}
-
-// Only react to interesting messages
-let autonomousTrigger = false;
-
-if (
-  chance > 0.85 &&
-  (
-    content.includes("btc") ||
-    content.includes("eth") ||
-    content.includes("pump") ||
-    content.includes("dump") ||
-    content.includes("gm") ||
-    content.includes("gn") ||
-    content.includes("moon") ||
-    content.includes("sad") ||
-    content.includes("love")
-  )
-) {
-  autonomousTrigger = true;
-}
-
-
-// ===== SMART PASSIVE MODE =====
-let passiveChance = 0.03; // very low base
-
-if (heat[guildId] > 8) passiveChance = 0.08;
-if (heat[guildId] > 15) passiveChance = 0.15;
-if (heat[guildId] > 25) passiveChance = 0.22;
-
-const shouldRespond = Math.random() < passiveChance;
-
-
 
  // ================= AI MODE (ONLY WHEN TAGGED) =================
 if (message.mentions.has(client.user) || shouldRespond || autonomousTrigger) {
@@ -485,113 +468,14 @@ if (memory[guildId][userId].length > 6) {
 }
 }
 
-   const input = userMessage.toLowerCase();
-let mood = "normal";
-const randomStyle = Math.random();
-
-if (
-  input.includes("sad") ||
-  input.includes("lost") ||
-  input.includes("down") ||
-  input.includes("tired") ||
-  input.includes("depressed")
-) {
-  mood = "supportive";
-}
-
-else if (
-  input.includes("btc") ||
-  input.includes("eth") ||
-  input.includes("pump") ||
-  input.includes("dump") ||
-  input.includes("market")
-) {
-  mood = "crypto";
-}
-
-else if (
-  input.includes("love") ||
-  input.includes("cute") ||
-  input.includes("hot") ||
-  input.includes("date") ||
-  input.includes("flirt")
-) {
-  mood = "flirty";
-}
-
-else if (
-  input.includes("roast") ||
-  input.includes("ugly") ||
-  input.includes("loser")
-) {
-  mood = "roast";
-}
-
-// ================= PERSONALITY UPDATE =================
-if (mood === "flirty") {
-  personality[guildId][userId].vibe = "flirty";
-}
-else if (mood === "crypto") {
-  personality[guildId][userId].vibe = "degen";
-}
-else if (mood === "supportive") {
-  personality[guildId][userId].vibe = "emotional";
-}
-else if (mood === "roast") {
-  personality[guildId][userId].vibe = "roast";
-}
-
-// ================= TRAIT & ENERGY SYSTEM =================
-
-const p = personality[guildId][userId];
-
-// Track last active
-p.lastActive = Date.now();
-
-// Energy shifts
-if (mood === "crypto" || mood === "roast") {
-  p.energy += 1;
-}
-
-if (mood === "supportive") {
-  p.energy -= 1;
-}
-
-// Long-term trait scoring
-if (mood === "crypto") {
-  p.degenScore += 1;
-}
-
-if (mood === "supportive") {
-  p.emotionalScore += 1;
-}
-
-// Clamp energy between -5 and +5
-if (p.energy > 5) p.energy = 5;
-if (p.energy < -5) p.energy = -5;
-
-// ================= TITLE EVOLUTION =================
-
-if (p.degenScore > 20) {
-  p.title = "Certified Degen";
-}
-else if (p.emotionalScore > 20) {
-  p.title = "Emotional Investor";
-}
-else if (p.energy >= 4) {
-  p.title = "Hype Beast";
-}
-else if (p.energy <= -4) {
-  p.title = "Existential Trader";
-}
-else {
-  p.title = "Market Participant";
-}
-
-// ================= SAVE PERSONALITY =================
+  const { mood, randomStyle } = handlePersonality({
+  userMessage,
+  personality,
+  guildId,
+  userId
+});
 
 scheduleSave();
-
 
     try {
 
@@ -613,57 +497,19 @@ activeRequests++;
         temperature: 0.8,
         max_tokens: 60,
 
-          messages: [
-            {
-        role: "system",
-        content: `
-You are a Discord bot inside a crypto server.
-
-Current mood context: ${mood}
-User personality vibe: ${personality[guildId][userId].vibe}
-User energy level: ${personality[guildId][userId].energy}
-User title: ${personality[guildId][userId].title}
-User degen score: ${personality[guildId][userId].degenScore}
-User emotional score: ${personality[guildId][userId].emotionalScore}
-Randomness factor: ${randomStyle}
-
-Energy rules:
-- If energy is +2 or +3 → very hype, confident, chaotic degen energy.
-- If energy is 0 → balanced normal tone.
-- If energy is -2 or -3 → calm, soft, emotionally supportive tone.
-
-
-
-Personality:
-- Reply in maximum 2 short sentences.
-- Casual Indian English.
-- Sharp, witty, confident.
-- Never sound like AI.
-- No long explanations.
-- No paragraphs.
-- No corporate tone.
-
-Mood logic:
-- If crypto topic → degen energy.
-- If user sad → calm and supportive.
-- If flirting → playful and smooth.
-- If roasting → roast lightly back.
-- If flexing → tease confidently.
-- If serious question → answer short and clear.
-
-Style rules:
-- If Randomness factor < 0.3 → slightly sarcastic.
-- If between 0.3–0.6 → playful.
-- If above 0.6 → calm confident.
-
-
-Keep replies human, crisp, and natural.
-`
-            },
-           ...memory[guildId][userId]
-          ]
+        messages: [
+    {
+     role: "system",
+        content: buildSystemPrompt({
+          mood,
+          personalityData: personality[guildId][userId],
+          randomStyle
         })
-      });
+      },
+      ...memory[guildId][userId]
+    ]
+  })
+});
 
       const data = await response.json();
       console.log("GROQ RESPONSE:");
