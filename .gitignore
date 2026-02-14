@@ -1,2 +1,5 @@
 node_modules
 .env
+memorySummary.json
+personality.json
+node

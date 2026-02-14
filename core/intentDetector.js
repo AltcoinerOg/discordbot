@@ -9,7 +9,11 @@ function detectIntent({ content, raidState, mentioned }) {
   if (raidState.active) return "raid";
 
   if (content.includes("$"))
-  return "crypto";
+    return "crypto";
+
+  // 🔥 MOVE THIS UP
+  if (mentioned)
+    return "ai";
 
   if (greetingWords.some(w => content === w || content.includes(w)))
     return "greeting";
@@ -20,10 +24,8 @@ function detectIntent({ content, raidState, mentioned }) {
   if (funWords.some(w => content.includes(w)))
     return "fun";
 
-  if (mentioned)
-    return "ai";
-
-  return "ai";
+  return "none";
 }
+
 
 module.exports = { detectIntent };

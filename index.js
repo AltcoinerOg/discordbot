@@ -151,7 +151,9 @@ ${recentMessages.map(m => `${m.role}: ${m.content}`).join("\n")}
 
 // ===== GLOBAL API CONTROL =====
 let activeRequests = 0;
-const MAX_ACTIVE_REQUESTS = 3; // safe limit
+const MAX_ACTIVE_REQUESTS = 4; // safe limit
+let lastAutonomousReply = 0;
+
 
 client.once(Events.ClientReady, () => {
   console.log(`Bot vibing as ${client.user.tag}`);
@@ -165,6 +167,9 @@ client.once(Events.ClientReady, () => {
     raidState.active = true;
     raidState.channelId = MORNING_CHANNEL_ID;
     raidState.links = 0;
+    raidState.startedAt = Date.now();
+    raidState.reminderSent = false;
+
 
     await channel.send(
 `🌅 <@&${ASSOCIATE_ROLE_ID}>
@@ -179,17 +184,20 @@ Refer to rules for engagement policies.`
     );
 
 // 10-minute reminder (20 minutes after raid start)
+const thisRaidStart = raidState.startedAt;
+
 setTimeout(async () => {
   if (!raidState.active) return;
+  if (raidState.reminderSent) return;
+  if (raidState.startedAt !== thisRaidStart) return;
 
-  await channel.send(
-`⏳ <@&${ASSOCIATE_ROLE_ID}>
+  raidState.reminderSent = true;
+
+  await channel.send(`⏳ <@&${ASSOCIATE_ROLE_ID}>
 
 Final 10 minutes.
 
-Submit all valid links before closing.`
-  );
-
+Submit all valid links before closing.`);
 }, 20 * 60 * 1000);
 
 
@@ -226,6 +234,9 @@ Complete engagement within **${hours} hour(s)**.`
     raidState.active = true;
     raidState.channelId = EVENING_CHANNEL_ID;
     raidState.links = 0;
+    raidState.startedAt = Date.now();
+    raidState.reminderSent = false;
+
 
     await channel.send(
 `🌆 <@&${ASSOCIATE_ROLE_ID}>
@@ -240,18 +251,23 @@ Refer to rules for engagement policies.`
     );
 
 // 10-minute reminder (20 minutes after raid start)
+const thisRaidStart = raidState.startedAt;
+
 setTimeout(async () => {
   if (!raidState.active) return;
+  if (raidState.reminderSent) return;
+  if (raidState.startedAt !== thisRaidStart) return;
 
-  await channel.send(
-`⏳ <@&${ASSOCIATE_ROLE_ID}>
+  raidState.reminderSent = true;
+
+  await channel.send(`⏳ <@&${ASSOCIATE_ROLE_ID}>
 
 Final 10 minutes.
 
-Submit all valid links before closing.`
-  );
-
+Submit all valid links before closing.`);
 }, 20 * 60 * 1000);
+
+
 
 
     // After 30 minutes (7:00 PM IST)
@@ -313,9 +329,11 @@ console.log("Detected Intent:", intent);
 
     const linkRegex = /(https?:\/\/[^\s]+)/g;
 
-    if (linkRegex.test(message.content)) {
-      raidState.links++;
-    }
+  const matches = message.content.match(linkRegex);
+  if (matches) {
+  raidState.links += matches.length;
+}
+
 
   }
 
@@ -332,14 +350,17 @@ const content = message.content.toLowerCase();
 const guildId = message.guild?.id;
 if (!guildId) return;
 
+const botAliases = ["bot", "Altys Slave", "bote", "slave"];
+
+const botDiscussed = botAliases.some(alias =>
+  content.includes(alias)
+);
+
 const { autonomousTrigger, shouldRespond } = handleAutonomousSystem(message);
-if (message.content.length < 3) return;
 
 const isReply = message.reference;
-
 const mentionsOthers =
-  message.mentions.users.size > 0 &&
-  !message.mentions.has(client.user);
+  message.mentions.users.some(user => user.id !== client.user.id);
 
 
 const seriousKeywords = [
@@ -357,59 +378,6 @@ const seriousKeywords = [
 const isSerious = seriousKeywords.some(word =>
   message.content.toLowerCase().includes(word)
 );
-
-
-if (
-  shouldRespond &&
-  !message.mentions.has(client.user) &&
-  !mentionsOthers &&
-  !isReply &&
-  !isSerious &&
-  !raidState.active &&
-  Math.random() < 0.08
-) {
-
-  try {
-
-   if (activeRequests >= MAX_ACTIVE_REQUESTS) return;
-
-    activeRequests++;
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.9,
-        max_tokens: 50,
-        messages: [
-          {
-            role: "system",
-            content: `You are a chaotic but funny Discord AI. Reply short. Casual Indian English.`
-          },
-          {
-            role: "user",
-            content: message.content
-          }
-        ]
-      })
-    });
-
-    const data = await response.json();
-
-    if (data?.choices?.[0]?.message?.content) {
-      await message.reply(data.choices[0].message.content);
-    }
-
-  } catch (err) {
-    console.error("Autonomous reply error:", err);
-  } finally {
-    activeRequests--;
-  }
-}
 
 
 // ================= SMART HYBRID CRYPTO ENGINE =================
@@ -559,8 +527,7 @@ if (!cooldown[guildId]) cooldown[guildId] = {};
 const now = Date.now();
 const userCooldown = cooldown[guildId][userId] || 0;
 
-// 7 second cooldown per user
-if (now - userCooldown < 7000) {
+if (now - userCooldown < 3000) {
   return message.reply("Arre thoda ruk 😅 processing chal raha hai.");
 }
 
@@ -583,8 +550,6 @@ if (!personality[guildId][userId]) {
     lastActive: Date.now()
   };
 }
-
-
 
 
 if (!memory[guildId]) {
@@ -723,9 +688,6 @@ scheduleMemorySave();
     memory[guildId][userId].recent.slice(-4);
 }
 
-
-
-
       return message.reply(botReply);
 
     } else {
@@ -742,6 +704,68 @@ scheduleMemorySave();
 
 } // ← this closes AI MODE properly
 
+if (
+  shouldRespond &&
+  !isReply &&
+  !isSerious &&
+  !raidState.active &&
+  (
+    botDiscussed ||
+    (
+      message.mentions.users.size === 0 &&
+      Math.random() < 0.02
+    )
+  )
+)
+ {
+
+  if (message.content.length < 3) return;
+
+  const nowTime = Date.now();
+  if (nowTime - lastAutonomousReply < 60000) return;
+  lastAutonomousReply = nowTime;
+
+  try {
+
+if (activeRequests >= MAX_ACTIVE_REQUESTS - 1) return;
+
+    activeRequests++;
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.9,
+        max_tokens: 50,
+        messages: [
+          {
+            role: "system",
+            content: `You are a chaotic but funny Discord AI. Reply short. Casual Indian English.`
+          },
+          {
+            role: "user",
+            content: message.content
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data?.choices?.[0]?.message?.content) {
+      await message.reply(data.choices[0].message.content);
+    }
+
+  } catch (err) {
+    console.error("Autonomous reply error:", err);
+  } finally {
+    activeRequests--;
+  }
+}
 
 });
 
