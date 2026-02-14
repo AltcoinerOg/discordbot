@@ -335,6 +335,13 @@ if (!guildId) return;
 const { autonomousTrigger, shouldRespond } = handleAutonomousSystem(message);
 if (message.content.length < 3) return;
 
+const isReply = message.reference;
+
+const mentionsOthers =
+  message.mentions.users.size > 0 &&
+  !message.mentions.has(client.user);
+
+
 const seriousKeywords = [
   "scam",
   "hack",
@@ -355,10 +362,13 @@ const isSerious = seriousKeywords.some(word =>
 if (
   shouldRespond &&
   !message.mentions.has(client.user) &&
+  !mentionsOthers &&
+  !isReply &&
   !isSerious &&
   !raidState.active &&
-  Math.random() < 0.15
+  Math.random() < 0.08
 ) {
+
   try {
 
    if (activeRequests >= MAX_ACTIVE_REQUESTS) return;
@@ -550,12 +560,14 @@ const now = Date.now();
 const userCooldown = cooldown[guildId][userId] || 0;
 
 // 7 second cooldown per user
-if (now - userCooldown < 7000) return;
+if (now - userCooldown < 7000) {
+  return message.reply("Arre thoda ruk 😅 processing chal raha hai.");
+}
+
+
+// update cooldown timestamp
 
 cooldown[guildId][userId] = now;
-
-
-
 
 if (!personality[guildId]) {
   personality[guildId] = {};
@@ -619,7 +631,7 @@ scheduleSave();
 
 // ===== GLOBAL API THROTTLE =====
 if (activeRequests >= MAX_ACTIVE_REQUESTS) {
-  return; // silently ignore if overloaded
+  return message.reply("Server thoda busy hai 😅 try again in few seconds.");
 }
 
 activeRequests++;
