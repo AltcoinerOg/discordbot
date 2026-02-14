@@ -57,7 +57,7 @@ return {
   symbol: data.symbol,
   price: data.market_data.current_price.usd || 0,
   marketCap: data.market_data.market_cap.usd || 0,
-  volume: data.market_data.total_volume.usd || 0,
+  volume24h: data.market_data?.total_volume?.usd || 0,
   rank: data.market_cap_rank || "N/A",
   change24h: data.market_data.price_change_percentage_24h || 0,
   website: data.links.homepage[0] || "N/A",
@@ -88,10 +88,10 @@ function calculateRisk(data) {
   }
 
   // Volume Risk
-  if (data.volume < 1000000) {
-    score += 2;
-  } else if (data.volume < 10000000) {
-    score += 1;
+  if (data.volume24h < 1000000) {
+  score += 2;
+  } else if (data.volume24h < 10000000) {
+  score += 1;
   }
 
   // Rank Risk

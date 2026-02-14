@@ -71,13 +71,13 @@ if (recentMessages[userId].length > 5) {
 // Detect same message repeated 3 times
 const repeatCount = recentMessages[userId].filter(msg => msg === content).length;
 
-if (repeatCount >= 3) {
- if (addStrike(userId, message, "Repeated spam detected")) {
+if (repeatCount >= 3 && content.length > 6) {
+  if (addStrike(userId, message, "Repeated spam detected")) {
+    return { blocked: true };
+  }
   return { blocked: true };
 }
-return { blocked: true };
 
-}
 
 // ================= SPEED SPAM DETECTION =================
 
@@ -97,7 +97,7 @@ if (messageTimestamps[userId].length > 5) {
 if (messageTimestamps[userId].length === 5) {
   const timeDiff = now - messageTimestamps[userId][0];
 
-  if (timeDiff < 4000) { // 4 seconds
+  if (timeDiff < 2500) { // 4 seconds
    if (addStrike(userId, message, "Flood spam detected")) {
   return { blocked: true };
 }
@@ -173,16 +173,22 @@ return { blocked: true };
 }
 
 
-// Caps spam detection
-if (message.content.length > 8 && message.content === message.content.toUpperCase()) {
-  if (addStrike(userId, message, "Caps spam")) {
-  return { blocked: true };
-}
-return { blocked: true };
 
+// Smart caps detection (only punish real shouting spam)
+const lettersOnly = message.content.replace(/[^a-zA-Z]/g, "");
+
+if (
+  lettersOnly.length > 15 && 
+  lettersOnly === lettersOnly.toUpperCase()
+) {
+  if (addStrike(userId, message, "Excessive caps spam")) {
+    return { blocked: true };
+  }
+  return { blocked: true };
 }
 
 // Very long spam detection
+
 if (message.content.length > 400) {
  if (addStrike(userId, message, "Message Too Long")) {
   return { blocked: true };

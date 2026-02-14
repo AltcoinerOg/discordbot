@@ -7,6 +7,7 @@ const { handleModeration } = require("./core/moderation");
 const { handleAutonomousSystem } = require("./core/autonomousSystem");
 const { handlePersonality } = require("./core/personalityEngine");
 const { buildSystemPrompt } = require("./core/promptBuilder");
+const { routeMessage } = require("./core/router");
 
 // ===== RAID CONFIG =====
 const MORNING_CHANNEL_ID = "1409772569556684851";
@@ -38,6 +39,24 @@ function scheduleSave() {
   }, 3000);
 }
 
+let memorySaveTimeout = null;
+
+function scheduleMemorySave() {
+  if (memorySaveTimeout) return;
+
+  memorySaveTimeout = setTimeout(() => {
+    fs.writeFile(
+      "./memorySummary.json",
+      JSON.stringify(memorySummary, null, 2),
+      (err) => {
+        if (err) console.error("Error saving memory summary:", err);
+      }
+    );
+    memorySaveTimeout = null;
+  }, 3000);
+}
+
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -49,6 +68,18 @@ const client = new Client({
 // 🧠 Memory Store (per server)
 const memory = {};
 let personality = {};
+let memorySummary = {};
+
+try {
+  if (fs.existsSync("./memorySummary.json")) {
+    const data = fs.readFileSync("./memorySummary.json", "utf8");
+    memorySummary = JSON.parse(data);
+    console.log("Memory summary loaded.");
+  }
+} catch (err) {
+  console.error("Error loading memory summary:", err);
+}
+
 
 try {
   if (fs.existsSync("./personality.json")) {
@@ -63,6 +94,60 @@ try {
 const heat = {};
 const cooldown = {};
 
+// ================= SUMMARY ENGINE =================
+
+async function generateSummary(oldSummary, recentMessages) {
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.3,
+        max_tokens: 120,
+        messages: [
+          {
+            role: "system",
+            content: `
+You summarize Discord conversations.
+
+Create a smart memory summary in 40-60 words.
+
+Focus on:
+- User personality
+- Emotional state
+- Ongoing topics
+- Important preferences
+- Behavior patterns
+
+Keep it concise and intelligent.
+`
+          },
+          {
+            role: "user",
+            content: `
+Previous summary:
+${oldSummary}
+
+Recent conversation:
+${recentMessages.map(m => `${m.role}: ${m.content}`).join("\n")}
+`
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    return data?.choices?.[0]?.message?.content || oldSummary;
+
+  } catch (err) {
+    console.error("Summary error:", err);
+    return oldSummary;
+  }
+}
 
 // ===== GLOBAL API CONTROL =====
 let activeRequests = 0;
@@ -92,6 +177,21 @@ Please share the link within 30 minutes.
 Links shared after that will be removed without notice.
 Refer to rules for engagement policies.`
     );
+
+// 10-minute reminder (20 minutes after raid start)
+setTimeout(async () => {
+  if (!raidState.active) return;
+
+  await channel.send(
+`⏳ <@&${ASSOCIATE_ROLE_ID}>
+
+Final 10 minutes.
+
+Submit all valid links before closing.`
+  );
+
+}, 20 * 60 * 1000);
+
 
     // After 30 minutes (12:00 PM IST)
     setTimeout(async () => {
@@ -139,6 +239,21 @@ Links shared after that will be removed without notice.
 Refer to rules for engagement policies.`
     );
 
+// 10-minute reminder (20 minutes after raid start)
+setTimeout(async () => {
+  if (!raidState.active) return;
+
+  await channel.send(
+`⏳ <@&${ASSOCIATE_ROLE_ID}>
+
+Final 10 minutes.
+
+Submit all valid links before closing.`
+  );
+
+}, 20 * 60 * 1000);
+
+
     // After 30 minutes (7:00 PM IST)
     setTimeout(async () => {
 
@@ -181,6 +296,17 @@ Check #verification and choose associate role. No tension 👍`
 client.on(Events.MessageCreate, async message => {
 
   if (message.author.bot) return;
+const intent = routeMessage({
+  message,
+  context: {
+    content: message.content,
+    raidState,
+    mentioned: message.mentions.has(client.user)
+  }
+});
+
+console.log("Detected Intent:", intent);
+
 
   // ===== RAID LINK TRACKING =====
   if (raidState.active && message.channel.id === raidState.channelId) {
@@ -207,91 +333,88 @@ const guildId = message.guild?.id;
 if (!guildId) return;
 
 const { autonomousTrigger, shouldRespond } = handleAutonomousSystem(message);
+if (message.content.length < 3) return;
+
+const seriousKeywords = [
+  "scam",
+  "hack",
+  "wallet drained",
+  "death",
+  "suicide",
+  "emergency",
+  "ban",
+  "warning",
+  "report"
+];
+
+const isSerious = seriousKeywords.some(word =>
+  message.content.toLowerCase().includes(word)
+);
+
+
+if (
+  shouldRespond &&
+  !message.mentions.has(client.user) &&
+  !isSerious &&
+  !raidState.active &&
+  Math.random() < 0.15
+) {
+  try {
+
+   if (activeRequests >= MAX_ACTIVE_REQUESTS) return;
+
+    activeRequests++;
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.9,
+        max_tokens: 50,
+        messages: [
+          {
+            role: "system",
+            content: `You are a chaotic but funny Discord AI. Reply short. Casual Indian English.`
+          },
+          {
+            role: "user",
+            content: message.content
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data?.choices?.[0]?.message?.content) {
+      await message.reply(data.choices[0].message.content);
+    }
+
+  } catch (err) {
+    console.error("Autonomous reply error:", err);
+  } finally {
+    activeRequests--;
+  }
+}
+
 
 // ================= SMART HYBRID CRYPTO ENGINE =================
 
-const cryptoKeywords = [
-  "price",
-  "analyze",
-  "risk",
-  "legit",
-  "farm",
-  "safe",
-  "buy",
-  "sell"
-];
+if (intent === "crypto") {
 
-const isCryptoQuery = cryptoKeywords.some(keyword =>
-  content.includes(keyword)
-);
+// Extract coin only from $symbol format
+const symbolMatch = message.content.match(/\$([a-zA-Z]{2,10})/);
 
-if (isCryptoQuery) {
-
-const stopWords = [
-  // trigger words
-  "price",
-  "analyze",
-  "risk",
-  "safe",
-  "legit",
-  "farm",
-  "buy",
-  "sell",
-
-  // common fillers
-  "is",
-  "are",
-  "was",
-  "were",
-  "should",
-  "can",
-  "could",
-  "would",
-  "do",
-  "does",
-  "did",
-  "i",
-  "me",
-  "my",
-  "you",
-  "it",
-  "this",
-  "that",
-  "of",
-  "the",
-  "a",
-  "an",
-
-  // question fillers
-  "what",
-  "about",
-  "how",
-  "when",
-  "where",
-  "why",
-
-  // time words
-  "today",
-  "now",
-  "tomorrow",
-
-  // generic crypto words
-  "coin",
-  "token",
-  "project"
-];
-
-
-const words = content
-  .split(" ")
-  .filter(word => !stopWords.includes(word));
-
-const possibleCoin = words.find(word => word.length >= 2);
-
-if (!possibleCoin) {
-  message.reply("Please specify a coin name. Example: price btc");
-  return;
+if (!symbolMatch) {
+  return message.reply("Use format like: price $btc");
 }
+
+const possibleCoin = symbolMatch[1].toLowerCase();
+
 
 
   const coinId = await searchCoin(possibleCoin);
@@ -304,6 +427,9 @@ if (!possibleCoin) {
 
     const risk = calculateRisk(coinData);
     const riskLevel = risk.level;
+    const priceChange = coinData.change24h;
+    const arrow = priceChange >= 0 ? "🔼" : "🔽";
+
 
 
     const formattedMarketCap =
@@ -311,23 +437,30 @@ if (!possibleCoin) {
         ? (coinData.marketCap / 1_000_000_000).toFixed(2) + "B"
         : (coinData.marketCap / 1_000_000).toFixed(2) + "M";
 
+    const formattedVolume =
+    coinData.volume24h > 1_000_000_000
+    ? (coinData.volume24h / 1_000_000_000).toFixed(2) + "B"
+    : (coinData.volume24h / 1_000_000).toFixed(2) + "M";
+
+
 let vibeComment = "";
 
 if (riskLevel.toLowerCase().includes("high"))
   vibeComment = "Proper degen territory.";
 else if (riskLevel.toLowerCase().includes("medium"))
-  vibeComment = "Decent but don’t sleep.";
+  vibeComment = "Decent but don't sleep.";
 else
   vibeComment = "Relatively stable vibes.";
 
     return message.reply(
-      `🔥 ${coinData.name}\n` +
-      `💰 $${coinData.price}\n` +
-      `📊 24h: ${coinData.change24h}%\n` +
-      `🏦 MC: $${formattedMarketCap}\n` +
-      `⚠ Risk: ${riskLevel}\n` +
-      `${vibeComment}`
-    );
+  `🔥 ${coinData.name} (${coinData.symbol.toUpperCase()})\n` +
+  `💰 $${coinData.price}\n` +
+  `📊 24h: ${arrow} ${priceChange}%\n` +
+  `🏦 MC: $${formattedMarketCap}\n` +
+  `📦 Vol: $${formattedVolume}\n` +
+  `⚠ Risk: ${riskLevel}\n` +
+  `${vibeComment}`
+);
   }
 
 // ===== FETCH CRYPTO NEWS FIRST =====
@@ -367,8 +500,11 @@ Analyze:
 
   try {
 
-    if (activeRequests >= MAX_ACTIVE_REQUESTS) return;
-    activeRequests++;
+   if (activeRequests >= MAX_ACTIVE_REQUESTS) {
+  return message.reply("Server thoda busy hai, 5 sec baad try karo 😅");
+  }
+  activeRequests++;
+
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -401,7 +537,7 @@ Analyze:
 }
 
  // ================= AI MODE (ONLY WHEN TAGGED) =================
-if (message.mentions.has(client.user) || shouldRespond || autonomousTrigger) {
+if (intent === "ai") {
 
 const guildId = message.guild.id;
 const userId = message.author.id;
@@ -444,7 +580,10 @@ if (!memory[guildId]) {
 }
 
 if (!memory[guildId][userId]) {
-  memory[guildId][userId] = [];
+  memory[guildId][userId] = {
+    summary: memorySummary[guildId]?.[userId] || "",
+    recent: []
+  };
 }
 
   const userMessage = message.content
@@ -457,15 +596,14 @@ if (!userMessage) {
 }
 
 // Save user message into memory
-if (userMessage.length > 2) {
-  memory[guildId][userId].push({
-    role: "user",
-    content: userMessage
-  });
 
-if (memory[guildId][userId].length > 6) {
-  memory[guildId][userId].shift();
-}
+if (userMessage.length > 2) {
+  memory[guildId][userId].recent.push({
+  role: "user",
+  content: userMessage
+});
+
+
 }
 
   const { mood, randomStyle } = handlePersonality({
@@ -498,16 +636,21 @@ activeRequests++;
         max_tokens: 60,
 
         messages: [
-    {
-     role: "system",
-        content: buildSystemPrompt({
-          mood,
-          personalityData: personality[guildId][userId],
-          randomStyle
-        })
-      },
-      ...memory[guildId][userId]
-    ]
+  {
+    role: "system",
+    content: buildSystemPrompt({
+      mood,
+      personalityData: personality[guildId][userId],
+      randomStyle,
+      raidActive: raidState.active
+    })
+  },
+  ...(memory[guildId][userId].summary
+    ? [{ role: "system", content: `Memory summary: ${memory[guildId][userId].summary}` }]
+    : []),
+  ...memory[guildId][userId].recent
+]
+
   })
 });
 
@@ -537,14 +680,37 @@ if (botReply.length > 180) {
 }
 
 
-     memory[guildId][userId].push({
+memory[guildId][userId].recent.push({
   role: "assistant",
   content: botReply
 });
 
-if (memory[guildId][userId].length > 6) {
-  memory[guildId][userId].shift();
+// ===== SMART MEMORY COMPRESSION =====
+if (memory[guildId][userId].recent.length > 6) {
+
+  const currentMemory = memory[guildId][userId];
+
+  const newSummary = await generateSummary(
+    currentMemory.summary,
+    currentMemory.recent
+  );
+
+  memory[guildId][userId].summary = newSummary;
+
+// Save only summary to file
+if (!memorySummary[guildId]) {
+  memorySummary[guildId] = {};
 }
+
+memorySummary[guildId][userId] = newSummary;
+scheduleMemorySave();
+
+
+  // Keep only last 2 exchanges (4 messages total max)
+  memory[guildId][userId].recent =
+    memory[guildId][userId].recent.slice(-4);
+}
+
 
 
 
@@ -565,155 +731,15 @@ if (memory[guildId][userId].length > 6) {
 } // ← this closes AI MODE properly
 
 
-  // ================= FAQ / SERVER HELP =================
-  if (content.includes("airdrop") || content.includes("tge"))
-    return message.reply("Airdrop/TGE? Arre chill yaar 😌 2069 confirmed.");
-
-  if (content.includes("cant send") || content.includes("can't send") || content.includes("raid channel"))
-    return message.reply("Bro pehle verify karlo and associate role pick karo 😄");
-
-  if (content.includes("is this legit"))
-    return message.reply("Haan bhai official server hai 😌 No fake DMs.");
-
-  if (content.includes("chad") || content.includes("top g") || content.includes("whale") || content.includes("rich"))
-    return message.reply("Chad? Top G? Whale? 😂 Obviously YoungOldman bro.");
-
-  if (content.includes("associate role"))
-    return message.reply("Associate role 👉 https://discord.com/channels/1343701000174698602/1459156218793951393/1459582869470187642");
-
-  if (content.includes("verification") || content.includes("verify"))
-    return message.reply("Verification 👉 https://discord.com/channels/1343701000174698602/1461261524168605816/1461261526122889419");
-
-  if (content.includes("morning raid"))
-    return message.reply("Morning raid 🌅 👉 https://discord.com/channels/1343701000174698602/1409772569556684851");
-
-  if (content.includes("evening raid"))
-    return message.reply("Evening raid 🌆 👉 https://discord.com/channels/1343701000174698602/1442484747191320678");
-
-  // ================= BASIC GREETINGS =================
-  if (content === "hi" || content === "hello")
-    return message.reply("Yo 👋 I was sleeping but ok.");
-
-  if (content.includes("how are you"))
-    return message.reply("Mentally unstable but operational 🤖");
-
-  if (content.includes("who are you"))
-    return message.reply("I am the server's unpaid employee.");
-
-  if (content.includes("rate me"))
-    return message.reply(`${Math.floor(Math.random() * 10) + 1}/10 😏`);
-
-  if (content.includes("good morning") || content === "gm")
-    return message.reply("GM legend ☀️ Charts check kiya ya sirf vibes?");
-
-  if (content.includes("good night") || content === "gn")
-    return message.reply("GN degen 🌙 Portfolio pump ho sapne me.");
-
-  // ================= ROAST MODE =================
-  if (content.includes("roast me")) {
-    const roasts = [
-      "You type like autocorrect gave up.",
-      "Main character delusion detected.",
-      "You clap when plane lands.",
-      "Limited edition human."
-    ];
-    return message.reply(roasts[Math.floor(Math.random() * roasts.length)]);
-  }
-
-  // ================= FLIRTY MODE =================
-  if (content.includes("i love you"))
-    return message.reply("I love you too… slow down tiger 😌");
-
-  if (content.includes("kiss me"))
-    return message.reply("💋 Virtual kiss delivered.");
-
-  if (content.includes("hug me"))
-    return message.reply("🤗 Aa ja yaar.");
-
-  if (content.includes("rizz"))
-    return message.reply("I don't chase. I ping.");
-
-  if (content.includes("good bot"))
-    return message.reply("Validation received 😌");
-
-  // ================= CRYPTO MODE =================
-  if (content.includes("btc"))
-    return message.reply("BTC mentioned 👀 Everyone act normal.");
-
-  if (content.includes("eth"))
-    return message.reply("ETH gas fees entered chat.");
-
-  if (content.includes("wen moon") || content.includes("when moon"))
-    return message.reply("Soon™️. Trust vibes.");
-
-  if (content.includes("bull run"))
-    return message.reply("Bull run loading... 3%");
-
-  if (content.includes("bear market"))
-    return message.reply("Bear market builds legends 🐻");
-
-  if (content.includes("dip"))
-    return message.reply("Every dip tasty lagta hai until you buy.");
-
-  if (content.includes("rug"))
-    return message.reply("Liquidity check karo pehle.");
-
-  if (content.includes("wagmi"))
-    return message.reply("WAGMI if survive long enough.");
-
-  if (content.includes("ngmi"))
-    return message.reply("Skill issue detected.");
-
-  if (content.includes("fomo"))
-    return message.reply("FOMO temporary. Pain permanent.");
-
-  if (content.includes("diamond hands"))
-    return message.reply("Diamond hands until rent due.");
-
-  if (content.includes("paper hands"))
-    return message.reply("Paper hands spotted 🚨");
-
-  if (content.includes("buy now"))
-    return message.reply("Not financial advice™️");
-
-  if (content.includes("sell now"))
-    return message.reply("Sell = pump. Hold = dump.");
-
-  // ================= ETH CHAOS =================
-  if (content.includes("gas"))
-    return message.reply("Gas fees higher than expectations.");
-
-  if (content.includes("layer 2") || content.includes("l2"))
-    return message.reply("L2 = cheaper mistakes.");
-
-  if (content.includes("arb"))
-    return message.reply("Arbitrum gang assembling.");
-
-  if (content.includes("metamask"))
-    return message.reply("Metamask popup = heart attack.");
-
-  if (content.includes("wallet drained"))
-    return message.reply("One click and generational wealth gone.");
-
-  // ================= GM CULTURE =================
-  if (content.includes("gm farmers"))
-    return message.reply("GM farmers 🌾 Grind hard.");
-
-  if (content.includes("ser"))
-    return message.reply("Yes ser?");
-
-  if (content.includes("based"))
-    return message.reply("Based and decentralized.");
-
-  if (content.includes("devs asleep"))
-    return message.reply("Devs asleep. Ship memes.");
-
-  if (content.includes("market red"))
-    return message.reply("Red candles build character.");
-
-  if (content.includes("market green"))
-    return message.reply("Green candles activate ego.");
-
 });
 
 client.login(process.env.TOKEN);
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});
+
