@@ -1,0 +1,91 @@
+const { routeMessage } = require("../core/router");
+const { handleModeration } = require("../core/moderation");
+const { handleAutonomousSystem } = require("../core/autonomousSystem");
+const stateManager = require("../services/stateManager");
+const config = require("../config");
+
+// Command Handlers
+const { handleCrypto } = require("../commands/cryptoHandler");
+const { handleChat } = require("../commands/chatHandler");
+const { getAutonomousReply } = require("../services/aiService");
+
+module.exports = {
+    name: "messageCreate",
+    async execute(message) {
+        if (message.author.bot) return;
+
+        // 1. RAID LINK TRACKING
+        const raidState = stateManager.getRaidState();
+        if (raidState.active && message.channel.id === raidState.channelId) {
+            const linkRegex = /(https?:\/\/[^\s]+)/g;
+            const matches = message.content.match(linkRegex);
+            if (matches) {
+                stateManager.updateRaidState({ links: raidState.links + matches.length });
+            }
+        }
+
+        // 2. MODERATION
+        const modResult = handleModeration(message);
+        if (modResult.blocked) return;
+
+        // 3. INTENT DETECTION
+        const intent = routeMessage({
+            message,
+            context: {
+                content: message.content,
+                raidState,
+                mentioned: message.mentions.has(message.client.user)
+            }
+        });
+
+        // 4. ROUTING
+        if (intent === "crypto") {
+            return handleCrypto(message);
+        }
+
+        if (intent === "ai") {
+            return handleChat(message);
+        }
+
+        // 5. AUTONOMOUS SYSTEM & REPLIES
+        const content = message.content.toLowerCase();
+        const botAliases = ["bot", "Altys Slave", "bote", "slave"];
+        const botDiscussed = botAliases.some(alias => content.includes(alias));
+
+        const { shouldRespond } = handleAutonomousSystem(message);
+        const isReply = message.reference;
+
+        const seriousKeywords = ["scam", "hack", "wallet drained", "death", "suicide", "emergency", "ban", "warning", "report"];
+        const isSerious = seriousKeywords.some(word => message.content.toLowerCase().includes(word));
+
+        if (
+            shouldRespond &&
+            !isReply &&
+            !isSerious &&
+            !raidState.active &&
+            (botDiscussed || (message.mentions.users.size === 0 && Math.random() < 0.02))
+        ) {
+            if (message.content.length < 3) return;
+
+            // Global autonomous throttle
+            const nowTime = Date.now();
+            if (nowTime - (module.exports.lastAutonomousReply || 0) < config.TIMINGS.AUTONOMOUS_COOLDOWN) return;
+            module.exports.lastAutonomousReply = nowTime;
+
+            try {
+                if (!stateManager.canMakeRequest()) return;
+                stateManager.incrementRequests();
+
+                const content = await getAutonomousReply(message.content);
+
+                if (content) {
+                    await message.reply(content);
+                }
+            } catch (err) {
+                console.error("Autonomous reply error:", err);
+            } finally {
+                stateManager.decrementRequests();
+            }
+        }
+    }
+};
