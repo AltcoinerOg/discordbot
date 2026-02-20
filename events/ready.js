@@ -15,7 +15,7 @@ module.exports = {
         // RAID LOGIC moved here or can be in a separate scheduler file. 
         // For now, keeping it here to effectively replace index.js logic.
 
-        const scheduleRaid = (channelId, timeString, greeting, duration, reminder) => {
+        const scheduleRaid = (channelId, timeString, greeting, duration, reminder, minHours) => {
             cron.schedule(timeString, async () => {
                 const channel = await client.channels.fetch(channelId);
                 if (!channel) return;
@@ -51,8 +51,9 @@ module.exports = {
                     const currentRaid = stateManager.getRaidState();
                     const totalLinks = currentRaid.links;
 
-                    let hours = 2;
+                    let hours = minHours;
                     if (totalLinks >= 30) hours = 3;
+                    else if (totalLinks >= 20 && minHours === 1) hours = 2;
 
                     await channel.send(
                         `📊 Today we have **${totalLinks} links**.\n\nComplete engagement within **${hours} hour(s)**.`
@@ -68,7 +69,8 @@ module.exports = {
             "30 11 * * *",
             `🌅 <@&${config.ROLES.ASSOCIATE}>\n\nGm associates!\n\nThe morning raid party has started.\nPlease share the link within 31 minutes.\n\nLinks shared after that will be removed without notice.\nRefer to rules for engagement policies.`,
             config.TIMINGS.MORNING_RAID_DURATION,
-            config.TIMINGS.MORNING_RAID_REMINDER
+            config.TIMINGS.MORNING_RAID_REMINDER,
+            1
         );
 
         // Evening Raid
@@ -77,7 +79,8 @@ module.exports = {
             "30 18 * * *",
             `🌆 <@&${config.ROLES.ASSOCIATE}>\n\nGood evening associates!\n\nThe evening raid party has started.\nPlease share the link within 61 minutes.\n\nLinks shared after that will be removed without notice.\nRefer to rules for engagement policies.`,
             config.TIMINGS.EVENING_RAID_DURATION,
-            config.TIMINGS.EVENING_RAID_REMINDER
+            config.TIMINGS.EVENING_RAID_REMINDER,
+            2
         );
     }
 };
