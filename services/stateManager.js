@@ -5,6 +5,7 @@ const config = require("../config");
 // File paths
 const PERSONALITY_FILE = path.join(__dirname, "../personality.json");
 const MEMORY_FILE = path.join(__dirname, "../memorySummary.json");
+const WATCHLIST_FILE = path.join(__dirname, "../watchlist.json");
 
 // In-memory state
 let personality = {};
@@ -18,6 +19,8 @@ let raidState = {
     reminderSent: false
 };
 let activeRequests = 0;
+let seenHeadlines = new Set();
+let watchlist = [];
 
 // Load data on startup
 function loadState() {
@@ -29,6 +32,10 @@ function loadState() {
         if (fs.existsSync(MEMORY_FILE)) {
             memorySummary = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
             console.log("Memory summary loaded.");
+        }
+        if (fs.existsSync(WATCHLIST_FILE)) {
+            watchlist = JSON.parse(fs.readFileSync(WATCHLIST_FILE, "utf8"));
+            console.log("Watchlist data loaded.");
         }
     } catch (err) {
         console.error("Error loading state files:", err);
@@ -55,6 +62,17 @@ function scheduleMemorySave() {
             if (err) console.error("Error saving memory summary:", err);
         });
         memorySaveTimeout = null;
+    }, config.TIMINGS.SAVE_TIMEOUT);
+}
+
+let watchlistSaveTimeout = null;
+function scheduleWatchlistSave() {
+    if (watchlistSaveTimeout) return;
+    watchlistSaveTimeout = setTimeout(() => {
+        fs.writeFile(WATCHLIST_FILE, JSON.stringify(watchlist, null, 2), (err) => {
+            if (err) console.error("Error saving watchlist:", err);
+        });
+        watchlistSaveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
 
@@ -106,5 +124,19 @@ module.exports = {
     },
     incrementRequests: () => activeRequests++,
     decrementRequests: () => activeRequests--,
-    canMakeRequest: () => activeRequests < config.API.MAX_ACTIVE_REQUESTS
+    canMakeRequest: () => activeRequests < config.API.MAX_ACTIVE_REQUESTS,
+    isHeadlineSeen: (headline) => seenHeadlines.has(headline),
+    addSeenHeadline: (headline) => {
+        seenHeadlines.add(headline);
+        // Keep set size manageable
+        if (seenHeadlines.size > 200) {
+            const arr = Array.from(seenHeadlines);
+            seenHeadlines = new Set(arr.slice(-100));
+        }
+    },
+    getWatchlist: () => watchlist,
+    updateWatchlist: (newList) => {
+        watchlist = newList;
+        scheduleWatchlistSave();
+    }
 };

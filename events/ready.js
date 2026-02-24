@@ -82,5 +82,51 @@ module.exports = {
             config.TIMINGS.EVENING_RAID_REMINDER,
             2
         );
+
+        // Evening Raid
+        scheduleRaid(
+            config.CHANNELS.EVENING_RAID,
+            "30 18 * * *",
+            `🌆 <@&${config.ROLES.ASSOCIATE}>\n\nGood evening associates!\n\nThe evening raid party has started.\nPlease share the link within 61 minutes.\n\nLinks shared after that will be removed without notice.\nRefer to rules for engagement policies.`,
+            config.TIMINGS.EVENING_RAID_DURATION,
+            config.TIMINGS.EVENING_RAID_REMINDER,
+            2
+        );
+
+        // --- NEXUS ELITE DAILY BRIEFING (10 AM IST) ---
+        const { getTrendingNews, getTrendingCoins, getTrendingSolanaCoins, getFearGreedIndex, getTopMovers } = require("../cryptoEngine");
+        const { getEliteDailyBriefing } = require("../services/aiService");
+
+        cron.schedule("0 10 * * *", async () => {
+            try {
+                const alertChannelId = config.CHANNELS.ALERTS_CHANNEL;
+                const channel = await client.channels.fetch(alertChannelId);
+                if (!channel) return;
+
+                if (!stateManager.canMakeRequest()) return;
+                stateManager.incrementRequests();
+
+                // Aggregate Data
+                const [news, coins, fng, movers, solana] = await Promise.all([
+                    getTrendingNews(),
+                    getTrendingCoins(),
+                    getFearGreedIndex(),
+                    getTopMovers(),
+                    getTrendingSolanaCoins()
+                ]);
+
+                const watchlist = stateManager.getWatchlist();
+
+                const briefing = await getEliteDailyBriefing({ news, coins, fng, movers, solana, watchlist });
+                if (briefing) {
+                    await channel.send(briefing);
+                }
+            } catch (err) {
+                console.error("NEXUS Daily Briefing Error:", err);
+            } finally {
+                stateManager.decrementRequests();
+            }
+        }, { timezone: "Asia/Kolkata" });
+
     }
 };

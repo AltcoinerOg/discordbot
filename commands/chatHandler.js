@@ -89,18 +89,18 @@ async function handleChat(message) {
 
             // 5. SMART MEMORY COMPRESSION
             if (userMemory.recent.length > 6) {
-                // We will run summary in background
                 const oldSummary = userMemory.summary;
                 const recent = userMemory.recent;
-
-                // Call summary generation (detached from main reply flow to be fast)
                 getMemorySummary(oldSummary, recent).then(newSummary => {
                     stateManager.updateMemorySummary(guildId, userId, newSummary);
                 });
-
-                // Truncate locally
                 userMemory.recent = userMemory.recent.slice(-4);
             }
+
+            // HUMAN-LIKE DELAY: Show typing and wait based on message length
+            await message.channel.sendTyping();
+            const delay = Math.min(Math.max(botReply.length * 50, 1500), 5000); // 50ms per char, min 1.5s, max 5s
+            await new Promise(res => setTimeout(res, delay));
 
             return message.reply(botReply);
 

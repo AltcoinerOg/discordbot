@@ -7,12 +7,23 @@ const config = require("../config");
 // Command Handlers
 const { handleCrypto } = require("../commands/cryptoHandler");
 const { handleChat } = require("../commands/chatHandler");
+const { handleNews, handleWatchlist } = require("../commands/newsHandler");
 const { getAutonomousReply } = require("../services/aiService");
 
 module.exports = {
     name: "messageCreate",
     async execute(message) {
         if (message.author.bot) return;
+
+        // Command processing
+        const prefix = "!";
+        const args = message.content.slice(prefix.length).trim().split(/ +/);
+        const command = args.shift()?.toLowerCase();
+        const isCommand = message.content.startsWith(prefix);
+
+        if (isCommand && command === "watchlist") {
+            return handleWatchlist(message, args);
+        }
 
         // 1. RAID LINK TRACKING
         const raidState = stateManager.getRaidState();
@@ -41,6 +52,10 @@ module.exports = {
         // 4. ROUTING
         if (intent === "crypto") {
             return handleCrypto(message);
+        }
+
+        if (intent === "news") {
+            return handleNews(message);
         }
 
         if (intent === "ai") {
@@ -79,6 +94,11 @@ module.exports = {
                 const content = await getAutonomousReply(message.content);
 
                 if (content) {
+                    // HUMAN-LIKE DELAY
+                    await message.channel.sendTyping();
+                    const delay = Math.min(Math.max(content.length * 50, 1500), 4000);
+                    await new Promise(res => setTimeout(res, delay));
+
                     await message.reply(content);
                 }
             } catch (err) {

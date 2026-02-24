@@ -111,9 +111,133 @@ async function getAutonomousReply(messageContent) {
   });
 }
 
+/**
+ * Generates the NEXUS MARKET DIGEST.
+ */
+async function getEnhancedNewsSummary({ news, coins, fng, movers }) {
+  const prompt = `
+    ### DATA INPUT ###
+    Latest News: ${news.join(" | ")}
+    Trending Coins: ${coins.join(", ")}
+    Fear & Greed Index: ${fng.value} (${fng.label})
+    Top Gainers: ${movers.gainers.join(", ")}
+    Top Losers: ${movers.losers.join(", ")}
+    
+    ### TASK ###
+    Create the "NEXUS MARKET DIGEST". 
+    Tone: Pro-trader, degen, blunt, Indian English style (Hinglish mix is okay).
+    
+    ### FORMAT ###
+    🔥 **NEXUS MARKET DIGEST** 🔥
+    🌡️ **Sentiment**: ${fng.value} - ${fng.label}
+    🚀 **Top Pumps**: (pick top 2 movers)
+    🔻 **Top Reks**: (pick top 2 movers)
+    📰 **The Tea**: (3 bullet points summarizing the most important news/trends)
+    
+    *Summary: (One line wrap up)*
+    
+    No disclaimers. Max 10 lines total.
+  `;
+
+  return await _callAI({
+    messages: [{ role: "system", content: prompt }],
+    max_tokens: 300,
+    temperature: 0.7
+  });
+}
+
+/**
+ * Generates the NEXUS Market-Leader Technical Briefing.
+ */
+async function getEliteDailyBriefing({ news, coins, fng, movers, solana, watchlist }) {
+  const dateStr = new Date().toLocaleDateString("en-IN", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+
+  const prompt = `
+    ### CONTEXT ###
+    Date: ${dateStr}
+    Latest News: ${news.join(" | ")}
+    Trending Global: ${coins.join(", ")}
+    Trending Solana: ${solana.join(", ")}
+    Watchlist Status: ${watchlist && watchlist.length > 0 ? watchlist.join(", ") : "None active"}
+    Fear & Greed: ${fng.value} (${fng.label})
+    Movers: ${movers.gainers.join(", ")} | ${movers.losers.join(", ")}
+    
+    ### TASK ###
+    Create the "NEXUS Market-Leader Technical Briefing". This is for an ELITE market-maker server.
+    
+    ### SECTIONS ###
+    1. 🌡️ HEAT LEVEL: (Convert Fear & Greed into a visual scale: 0-20 Arctic, 21-40 Chilly, 41-60 Neutral, 61-80 Tropical, 81-100 Volcanic. Follow with a 1-sentence sharp analytical narrative).
+    
+    2. 🗞️ THE NEXUS CHRONICLE: (Select top 3 news headlines. Tell a "small story" for each. Provide 1-2 sentences of context/narrative explaining WHY this matters. Use bullet points •).
+    
+    3. 🐋 WHALE PULSE: (Identify large movements or exchange inflows/outflows from the news. Narrate potential impacts on price discovery).
+    
+    4. 🛡️ RUG WATCH: (Scan news for vulnerabilities, exploits, hacks, or massive unlock events. Flag them as critical security alerts).
+    
+    5. 💎 THE ALPHA HUB: (Check news/feeds for New Listings, New Airdrop project launches, TGE soon projects, and Testnet soon projects. List these as high-value opportunities).
+    
+    6. ☀️ SOLANA SPOTLIGHT: (Mention the top trending SOL tokens [${solana.join(", ")}]. Comment on current chain momentum).
+    
+    7. 📊 NEXUS HIGH-SIGNAL SELECTIONS: (Identify 3-4 projects with the most technical or fundamental alpha from the global data context).
+    
+    8. 👀 CONVICTION TRACKER: (Provide updates on the user's watchlist [${watchlist && watchlist.length > 0 ? watchlist.join(", ") : "None active"}]. If no items are in the news, mention their current market standing).
+    
+    ### FORMATTING ###
+    - Title: 🥂 **GOOD MORNING NEXUS**
+    - Sub-header: 📅 **${dateStr} (IST)**
+    - Professional dividers: ---
+    - SINGLE spacing only. Use dividers to separate the 8 main narrative sections.
+    - Style: Sophisticated, elite, authoritative. 
+    Max 30 lines. No disclaimers.
+  `;
+
+  return await _callAI({
+    messages: [{ role: "system", content: prompt }],
+    max_tokens: 600,
+    temperature: 0.6
+  });
+}
+
+/**
+ * Generates the NEXUS BREAKING ALERT.
+ */
+async function getBreakingAlert(headline) {
+  const isWhale = /whale|transfer|move|wallet|coinbase|binance/i.test(headline);
+  const isMacro = /trump|fed|tariff|ban|regulation|sec/i.test(headline);
+
+  const prompt = `
+    Headline: ${headline}
+    ${isWhale ? "Note: This is a Whale movement." : ""}
+    ${isMacro ? "Note: This is a Macro/Political event." : ""}
+
+    Task: Create a "NEXUS BREAKING ALERT".
+    Tone: Urgent, hype, degen. 
+    Format: 
+    🚨 **NEXUS BREAKING ALERT** 🚨
+    (Optional Emoji based on context) (Crucial headline summary)
+    (One sentence on potential impact)
+    
+    *React with 🚀 if you're long or 📉 if you're short!*
+  `;
+
+  return await _callAI({
+    messages: [{ role: "system", content: prompt }],
+    max_tokens: 100,
+    temperature: 0.8
+  });
+}
+
 module.exports = {
   getChatResponse,
   getMemorySummary,
   getCryptoAnalysis,
-  getAutonomousReply
+  getAutonomousReply,
+  getEnhancedNewsSummary,
+  getBreakingAlert,
+  getEliteDailyBriefing
 };
