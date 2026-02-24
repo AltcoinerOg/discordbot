@@ -18,7 +18,7 @@ module.exports = {
         DISCORD_TOKEN: process.env.TOKEN,
         MAX_ACTIVE_REQUESTS: 4,
         GROQ_MODEL: "llama-3.3-70b-versatile",
-        API_PORT: process.env.API_PORT || 3000,
+        API_PORT: process.env.PORT || process.env.API_PORT || 3000,
         API_SECRET: process.env.API_SECRET || "changeme"
     },
 
