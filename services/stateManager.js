@@ -38,6 +38,7 @@ async function connectDB() {
 
 // Helper to fetch data
 async function loadStateFromDB() {
+    if (!config.API.MONGO_URI) return;
     try {
         const types = ['personality', 'memorySummary', 'watchlist', 'moderation'];
         for (const type of types) {
@@ -64,7 +65,7 @@ async function loadState() {
 // Save helpers with debounce
 let saveTimeout = null;
 function scheduleSave() {
-    if (saveTimeout) return;
+    if (!config.API.MONGO_URI || saveTimeout) return;
     saveTimeout = setTimeout(async () => {
         try {
             await State.findOneAndUpdate(
@@ -79,7 +80,7 @@ function scheduleSave() {
 
 let memorySaveTimeout = null;
 function scheduleMemorySave() {
-    if (memorySaveTimeout) return;
+    if (!config.API.MONGO_URI || memorySaveTimeout) return;
     memorySaveTimeout = setTimeout(async () => {
         try {
             await State.findOneAndUpdate(
@@ -94,7 +95,7 @@ function scheduleMemorySave() {
 
 let watchlistSaveTimeout = null;
 function scheduleWatchlistSave() {
-    if (watchlistSaveTimeout) return;
+    if (!config.API.MONGO_URI || watchlistSaveTimeout) return;
     watchlistSaveTimeout = setTimeout(async () => {
         try {
             await State.findOneAndUpdate(
@@ -109,7 +110,7 @@ function scheduleWatchlistSave() {
 
 let moderationSaveTimeout = null;
 function scheduleModerationSave() {
-    if (moderationSaveTimeout) return;
+    if (!config.API.MONGO_URI || moderationSaveTimeout) return;
     moderationSaveTimeout = setTimeout(async () => {
         try {
             await State.findOneAndUpdate(
