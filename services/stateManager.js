@@ -1,12 +1,15 @@
 const config = require("../config");
 const mongoose = require("mongoose");
-const State = require("../models/State");
+const UserState = require("../models/UserState");
+const SystemState = require("../models/SystemState");
 const logger = require("./logger");
+const { LRUCache } = require("lru-cache");
 
-// In-memory state (caches data from DB for fast synchronous reads)
-let personality = {};
-let memorySummary = {};
-let memory = {}; // Per-session memory
+// Set up LRU Caches for in-memory mappings to prevent memory leaks over time
+const personality = new LRUCache({ max: 500 });
+const memorySummary = new LRUCache({ max: 500 });
+const memory = new LRUCache({ max: 500 }); // Per-session active history
+let dailyTokens = 0; // Runtime tally, synced to DB periodically
 let raidState = {
     active: false,
     channelId: null,
@@ -40,17 +43,25 @@ async function connectDB() {
 async function loadStateFromDB() {
     if (!config.API.MONGO_URI) return;
     try {
-        const types = ['personality', 'memorySummary', 'watchlist', 'moderation'];
+        // NOTE: LRU caches do not need to boot everything at once; they fetch dynamically on demand
+        // However, we still fetch system-wide persistent states (watchlist/moderation)
+        const types = ['watchlist', 'moderation'];
         for (const type of types) {
-            const doc = await State.findOne({ type }).lean();
+            const doc = await SystemState.findOne({ type }).lean();
             if (doc && doc.data) {
-                if (type === 'personality') personality = doc.data;
-                if (type === 'memorySummary') memorySummary = doc.data;
                 if (type === 'watchlist') watchlist = doc.data;
                 if (type === 'moderation') moderationState = doc.data;
             }
         }
-        logger.log("State successfully loaded from MongoDB.");
+
+        // Fetch today's token count
+        const today = new Date().toISOString().split('T')[0];
+        const tokenDoc = await SystemState.findOne({ type: 'llmTokens' }).lean();
+        if (tokenDoc && tokenDoc.data && tokenDoc.data[today]) {
+            dailyTokens = tokenDoc.data[today];
+        }
+
+        logger.log("System state successfully loaded from MongoDB.");
     } catch (err) {
         logger.error("Error loading state from MongoDB:", err);
     }
@@ -65,31 +76,28 @@ async function loadState() {
 // Save helpers with debounce
 let saveTimeout = null;
 function scheduleSave() {
-    if (!config.API.MONGO_URI || saveTimeout) return;
-    saveTimeout = setTimeout(async () => {
-        try {
-            await State.findOneAndUpdate(
-                { type: 'personality' },
-                { data: personality },
-                { upsert: true }
-            );
-        } catch (err) { logger.error("Error saving personality to DB:", err); }
-        saveTimeout = null;
-    }, config.TIMINGS.SAVE_TIMEOUT);
+    // Disabled mass-saving: Data will now save per-user synchronously during updatePersonality
 }
 
 let memorySaveTimeout = null;
 function scheduleMemorySave() {
-    if (!config.API.MONGO_URI || memorySaveTimeout) return;
-    memorySaveTimeout = setTimeout(async () => {
+    // Disabled mass-saving: Data will now save per-user synchronously during updateMemorySummary
+}
+
+let tokenSaveTimeout = null;
+function scheduleTokenSave(dailyCount, dateString) {
+    if (!config.API.MONGO_URI || tokenSaveTimeout) return;
+    tokenSaveTimeout = setTimeout(async () => {
         try {
-            await State.findOneAndUpdate(
-                { type: 'memorySummary' },
-                { data: memorySummary },
+            // Merge logic for the date key
+            const updateKey = `data.${dateString}`;
+            await SystemState.updateOne(
+                { type: 'llmTokens' },
+                { $set: { [updateKey]: dailyCount } },
                 { upsert: true }
             );
-        } catch (err) { logger.error("Error saving memory summary to DB:", err); }
-        memorySaveTimeout = null;
+        } catch (err) { logger.error("Error saving tokens to DB:", err); }
+        tokenSaveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
 
@@ -98,7 +106,7 @@ function scheduleWatchlistSave() {
     if (!config.API.MONGO_URI || watchlistSaveTimeout) return;
     watchlistSaveTimeout = setTimeout(async () => {
         try {
-            await State.findOneAndUpdate(
+            await SystemState.findOneAndUpdate(
                 { type: 'watchlist' },
                 { data: watchlist },
                 { upsert: true }
@@ -113,7 +121,7 @@ function scheduleModerationSave() {
     if (!config.API.MONGO_URI || moderationSaveTimeout) return;
     moderationSaveTimeout = setTimeout(async () => {
         try {
-            await State.findOneAndUpdate(
+            await SystemState.findOneAndUpdate(
                 { type: 'moderation' },
                 { data: moderationState },
                 { upsert: true }
@@ -126,42 +134,51 @@ function scheduleModerationSave() {
 module.exports = {
     loadState,
     getPersonality: (guildId, userId) => {
-        if (!personality[guildId]) personality[guildId] = {};
-        if (!personality[guildId][userId]) {
-            personality[guildId][userId] = {
+        const key = `${guildId}-${userId}`;
+        if (!personality.has(key)) {
+            personality.set(key, {
                 vibe: "normal",
                 energy: 0,
                 degenScore: 0,
                 emotionalScore: 0,
                 title: "New Spawn",
                 lastActive: Date.now()
-            };
+            });
         }
-        return personality[guildId][userId];
+        return personality.get(key);
     },
     updatePersonality: (guildId, userId, data) => {
-        if (!personality[guildId]) personality[guildId] = {};
-        personality[guildId][userId] = { ...personality[guildId][userId], ...data };
-        scheduleSave();
+        const key = `${guildId}-${userId}`;
+        const current = personality.get(key) || {};
+        const updated = { ...current, ...data };
+        personality.set(key, updated);
+
+        if (config.API.MONGO_URI) {
+            UserState.findOneAndUpdate(
+                { guildId, userId },
+                { $set: { personality: updated } },
+                { upsert: true, new: true }
+            ).catch(err => logger.error("DB Personality Save Err:", err));
+        }
     },
     getMemory: (guildId, userId) => {
-        if (!memory[guildId]) memory[guildId] = {};
-        if (!memory[guildId][userId]) {
-            memory[guildId][userId] = {
-                summary: memorySummary[guildId]?.[userId] || "",
+        const key = `${guildId}-${userId}`;
+        if (!memory.has(key)) {
+            memory.set(key, {
+                summary: memorySummary.get(key) || "",
                 recent: []
-            };
+            });
         }
-        return memory[guildId][userId];
+        return memory.get(key);
     },
     updateMemorySummary: (guildId, userId, summary) => {
-        if (!memorySummary[guildId]) memorySummary[guildId] = {};
-        memorySummary[guildId][userId] = summary;
-        scheduleMemorySave();
+        const key = `${guildId}-${userId}`;
+        memorySummary.set(key, summary);
 
-        // Update active memory session too if needed
-        if (memory[guildId]?.[userId]) {
-            memory[guildId][userId].summary = summary;
+        const activeSesh = memory.get(key);
+        if (activeSesh) {
+            activeSesh.summary = summary;
+            memory.set(key, activeSesh);
         }
     },
     getRaidState: () => raidState,
@@ -199,5 +216,12 @@ module.exports = {
             moderationState.tempBlockedUsers[userId] = expiry;
         }
         scheduleModerationSave();
+    },
+    trackTokens: (tokensUsed) => {
+        if (!tokensUsed || typeof tokensUsed !== 'number') return;
+        const today = new Date().toISOString().split('T')[0];
+
+        dailyTokens += tokensUsed;
+        scheduleTokenSave(dailyTokens, today);
     }
 };

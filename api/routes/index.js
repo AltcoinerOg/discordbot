@@ -2,33 +2,18 @@ const express = require("express");
 const router = express.Router();
 const config = require("../../config");
 const crypto = require("crypto");
+const rateLimit = require("express-rate-limit");
 
-// In-memory rate limiter for API endpoints
-const apiRateLimit = {};
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const MAX_REQUESTS = 10;
+// Setup express-rate-limit to prevent memory leaks and DDoS
+const apiRateLimit = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10, // Limit each IP to 10 requests per `window` (here, per minute)
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    message: { error: "Too many requests. Try again later." }
+});
 
-function rateLimiter(req, res, next) {
-    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-    const now = Date.now();
-
-    if (!apiRateLimit[ip]) {
-        apiRateLimit[ip] = { count: 1, reset: now + RATE_LIMIT_WINDOW };
-    } else {
-        if (now > apiRateLimit[ip].reset) {
-            apiRateLimit[ip] = { count: 1, reset: now + RATE_LIMIT_WINDOW };
-        } else {
-            apiRateLimit[ip].count++;
-        }
-    }
-
-    if (apiRateLimit[ip].count > MAX_REQUESTS) {
-        return res.status(429).json({ error: "Too many requests. Try again later." });
-    }
-    next();
-}
-
-// Middleware: Authenticate requests using timing-safe comparison
+// Middleware: Authenticate requests using secure hashed timing-safe comparison
 function authenticate(req, res, next) {
     const providedSecret = req.headers["x-api-secret"];
     const expectedSecret = config.API.API_SECRET;
@@ -38,11 +23,11 @@ function authenticate(req, res, next) {
     }
 
     try {
-        // Timing-safe comparison to prevent timing attacks
-        const providedBuffer = Buffer.from(providedSecret);
-        const expectedBuffer = Buffer.from(expectedSecret);
+        // Hash both secrets before comparison to prevent length-based timing attacks
+        const providedHash = crypto.createHash("sha256").update(providedSecret).digest();
+        const expectedHash = crypto.createHash("sha256").update(expectedSecret).digest();
 
-        if (providedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
+        if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
             return res.status(401).json({ error: "Unauthorized: Invalid API secret." });
         }
     } catch (err) {
@@ -57,7 +42,7 @@ module.exports = (client) => {
      * GET /health
      * Public endpoint. Returns bot status.
      */
-    router.get("/health", rateLimiter, (req, res) => {
+    router.get("/health", apiRateLimit, (req, res) => {
         const isReady = client.isReady();
         res.status(isReady ? 200 : 503).json({
             status: isReady ? "ok" : "unavailable",
@@ -69,7 +54,7 @@ module.exports = (client) => {
      * GET /stats
      * Public endpoint. Returns bot statistics.
      */
-    router.get("/stats", rateLimiter, (req, res) => {
+    router.get("/stats", apiRateLimit, (req, res) => {
         if (!client.isReady()) {
             return res.status(503).json({ error: "Bot is not ready yet." });
         }
@@ -86,7 +71,7 @@ module.exports = (client) => {
      * POST /message
      * Protected endpoint. Sends a message to a Discord channel.
      */
-    router.post("/message", rateLimiter, authenticate, async (req, res) => {
+    router.post("/message", apiRateLimit, authenticate, async (req, res) => {
         const { channelId, content } = req.body;
 
         if (!channelId || !content) {

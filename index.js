@@ -24,13 +24,19 @@ client.on(guildMemberAddEvent.name, (...args) => guildMemberAddEvent.execute(...
 
 const logger = require("./services/logger");
 
-// Global Error Handlers
+// Global Error Handlers - Graceful Shutdowns
 process.on("unhandledRejection", (err) => {
   logger.error("Unhandled Rejection:", err);
+  logger.error("Shutting down process to maintain memory integrity...");
+  if (client) client.destroy();
+  process.exit(1);
 });
 
 process.on("uncaughtException", (err) => {
   logger.error("Uncaught Exception:", err);
+  logger.error("Shutting down process to maintain memory integrity...");
+  if (client) client.destroy();
+  process.exit(1);
 });
 
 client.login(config.API.DISCORD_TOKEN).then(() => {

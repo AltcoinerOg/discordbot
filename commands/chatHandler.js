@@ -29,7 +29,28 @@ async function handleChat(message) {
         .replace(`<@!${message.client.user.id}>`, "")
         .trim();
 
+    // 2.5 CREATOR & MENTIONS DETECTION
+    const isCreator = (userId === config.API.CREATOR_ID);
+    const mentionedUsers = message.mentions.users.filter(u => u.id !== message.client.user.id);
+    let mentionedCreator = false;
+    const mentionedUsersContext = [];
+
+    for (const [id, user] of mentionedUsers) {
+        if (id === config.API.CREATOR_ID) mentionedCreator = true;
+
+        const mContext = stateManager.getMemory(guildId, id);
+        const pContext = stateManager.getPersonality(guildId, id);
+        mentionedUsersContext.push({
+            id,
+            tag: user.tag,
+            displayName: user.username,
+            summary: mContext.summary,
+            personality: pContext
+        });
+    }
+
     if (!userMessage) {
+        if (isCreator) return message.reply("Boliye my creator, how can I serve you today? 👑");
         return message.reply("Haan bolo ser 😌 kya scene hai?");
     }
 
@@ -66,7 +87,10 @@ async function handleChat(message) {
             personality: personalityData,
             raidState,
             mood,
-            randomStyle
+            randomStyle,
+            isCreator,
+            mentionedCreator,
+            mentionedUsersContext
         });
 
         if (botReplyRaw) {

@@ -20,7 +20,8 @@ module.exports = {
         GROQ_MODEL: "llama-3.3-70b-versatile",
         API_PORT: process.env.PORT || process.env.API_PORT || 3000,
         API_SECRET: process.env.API_SECRET || "changeme",
-        MONGO_URI: process.env.MONGO_URI
+        MONGO_URI: process.env.MONGO_URI,
+        CREATOR_ID: process.env.CREATOR_ID || "1200788521347186689"
     },
 
     // Timings (in milliseconds)
