@@ -6,11 +6,11 @@ const stateManager = require("../services/stateManager");
 module.exports = {
     name: Events.ClientReady,
     once: true,
-    execute(client) {
+    async execute(client) {
         console.log(`Bot vibing as ${client.user.tag}`);
 
         // Load State
-        stateManager.loadState();
+        await stateManager.loadState();
 
         // RAID LOGIC moved here or can be in a separate scheduler file. 
         // For now, keeping it here to effectively replace index.js logic.

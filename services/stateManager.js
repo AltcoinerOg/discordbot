@@ -1,14 +1,9 @@
-const fs = require("fs");
-const path = require("path");
 const config = require("../config");
+const mongoose = require("mongoose");
+const State = require("../models/State");
+const logger = require("./logger");
 
-// File paths
-const PERSONALITY_FILE = path.join(__dirname, "../personality.json");
-const MEMORY_FILE = path.join(__dirname, "../memorySummary.json");
-const WATCHLIST_FILE = path.join(__dirname, "../watchlist.json");
-const MODERATION_FILE = path.join(__dirname, "../moderationState.json");
-
-// In-memory state
+// In-memory state (caches data from DB for fast synchronous reads)
 let personality = {};
 let memorySummary = {};
 let memory = {}; // Per-session memory
@@ -27,38 +22,57 @@ let moderationState = {
     tempBlockedUsers: {}
 };
 
-// Load data on startup
-function loadState() {
-    try {
-        if (fs.existsSync(PERSONALITY_FILE)) {
-            personality = JSON.parse(fs.readFileSync(PERSONALITY_FILE, "utf8"));
-            console.log("Personality data loaded.");
-        }
-        if (fs.existsSync(MEMORY_FILE)) {
-            memorySummary = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
-            console.log("Memory summary loaded.");
-        }
-        if (fs.existsSync(WATCHLIST_FILE)) {
-            watchlist = JSON.parse(fs.readFileSync(WATCHLIST_FILE, "utf8"));
-            console.log("Watchlist data loaded.");
-        }
-        if (fs.existsSync(MODERATION_FILE)) {
-            moderationState = JSON.parse(fs.readFileSync(MODERATION_FILE, "utf8"));
-            console.log("Moderation state loaded.");
-        }
-    } catch (err) {
-        console.error("Error loading state files:", err);
+// Connect to Database
+async function connectDB() {
+    if (!config.API.MONGO_URI) {
+        logger.warn("MONGO_URI not set. State will NOT be saved permanently.");
+        return;
     }
+    try {
+        await mongoose.connect(config.API.MONGO_URI);
+        logger.log("Connected to MongoDB.");
+    } catch (err) {
+        logger.error("MongoDB connection error:", err);
+    }
+}
+
+// Helper to fetch data
+async function loadStateFromDB() {
+    try {
+        const types = ['personality', 'memorySummary', 'watchlist', 'moderation'];
+        for (const type of types) {
+            const doc = await State.findOne({ type }).lean();
+            if (doc && doc.data) {
+                if (type === 'personality') personality = doc.data;
+                if (type === 'memorySummary') memorySummary = doc.data;
+                if (type === 'watchlist') watchlist = doc.data;
+                if (type === 'moderation') moderationState = doc.data;
+            }
+        }
+        logger.log("State successfully loaded from MongoDB.");
+    } catch (err) {
+        logger.error("Error loading state from MongoDB:", err);
+    }
+}
+
+// Load data on startup
+async function loadState() {
+    await connectDB();
+    await loadStateFromDB();
 }
 
 // Save helpers with debounce
 let saveTimeout = null;
 function scheduleSave() {
     if (saveTimeout) return;
-    saveTimeout = setTimeout(() => {
-        fs.writeFile(PERSONALITY_FILE, JSON.stringify(personality, null, 2), (err) => {
-            if (err) console.error("Error saving personality:", err);
-        });
+    saveTimeout = setTimeout(async () => {
+        try {
+            await State.findOneAndUpdate(
+                { type: 'personality' },
+                { data: personality },
+                { upsert: true }
+            );
+        } catch (err) { logger.error("Error saving personality to DB:", err); }
         saveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
@@ -66,10 +80,14 @@ function scheduleSave() {
 let memorySaveTimeout = null;
 function scheduleMemorySave() {
     if (memorySaveTimeout) return;
-    memorySaveTimeout = setTimeout(() => {
-        fs.writeFile(MEMORY_FILE, JSON.stringify(memorySummary, null, 2), (err) => {
-            if (err) console.error("Error saving memory summary:", err);
-        });
+    memorySaveTimeout = setTimeout(async () => {
+        try {
+            await State.findOneAndUpdate(
+                { type: 'memorySummary' },
+                { data: memorySummary },
+                { upsert: true }
+            );
+        } catch (err) { logger.error("Error saving memory summary to DB:", err); }
         memorySaveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
@@ -77,10 +95,14 @@ function scheduleMemorySave() {
 let watchlistSaveTimeout = null;
 function scheduleWatchlistSave() {
     if (watchlistSaveTimeout) return;
-    watchlistSaveTimeout = setTimeout(() => {
-        fs.writeFile(WATCHLIST_FILE, JSON.stringify(watchlist, null, 2), (err) => {
-            if (err) console.error("Error saving watchlist:", err);
-        });
+    watchlistSaveTimeout = setTimeout(async () => {
+        try {
+            await State.findOneAndUpdate(
+                { type: 'watchlist' },
+                { data: watchlist },
+                { upsert: true }
+            );
+        } catch (err) { logger.error("Error saving watchlist to DB:", err); }
         watchlistSaveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
@@ -88,13 +110,18 @@ function scheduleWatchlistSave() {
 let moderationSaveTimeout = null;
 function scheduleModerationSave() {
     if (moderationSaveTimeout) return;
-    moderationSaveTimeout = setTimeout(() => {
-        fs.writeFile(MODERATION_FILE, JSON.stringify(moderationState, null, 2), (err) => {
-            if (err) console.error("Error saving moderation state:", err);
-        });
+    moderationSaveTimeout = setTimeout(async () => {
+        try {
+            await State.findOneAndUpdate(
+                { type: 'moderation' },
+                { data: moderationState },
+                { upsert: true }
+            );
+        } catch (err) { logger.error("Error saving moderation state to DB:", err); }
         moderationSaveTimeout = null;
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
+
 module.exports = {
     loadState,
     getPersonality: (guildId, userId) => {
