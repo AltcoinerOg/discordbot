@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const config = require("../config");
 const logger = require("../services/logger");
+const routes = require("./routes");
 
 /**
  * Starts the API Gateway server.
