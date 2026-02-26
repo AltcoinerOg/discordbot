@@ -32,6 +32,7 @@ module.exports = {
         if (modResult.blocked) return;
 
         // 3. INTENT DETECTION
+        const raidState = stateManager.getRaidState();
         const intent = routeMessage({
             message,
             context: {
