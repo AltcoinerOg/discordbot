@@ -45,11 +45,33 @@ module.exports = {
                     await channel.send(`⏳ <@&${config.ROLES.ASSOCIATE}>\n\nFinal 10 minutes.\n\nSubmit all valid links before closing.`);
                 }, reminder);
 
-                // End Raid
+                // End Raid — count links fresh from channel history
                 setTimeout(async () => {
                     stateManager.updateRaidState({ active: false });
-                    const currentRaid = stateManager.getRaidState();
-                    const totalLinks = currentRaid.links;
+                    const raidStart = stateManager.getRaidState().startedAt;
+
+                    // Fetch up to 500 messages since raid started and count URLs
+                    const linkRegex = /(https?:\/\/[^\s]+)/g;
+                    let totalLinks = 0;
+                    let lastId = null;
+
+                    outerLoop: while (true) {
+                        const options = { limit: 100 };
+                        if (lastId) options.before = lastId;
+
+                        const fetched = await channel.messages.fetch(options);
+                        if (fetched.size === 0) break;
+
+                        for (const msg of fetched.values()) {
+                            // Stop once we reach messages older than raid start
+                            if (msg.createdTimestamp < raidStart) break outerLoop;
+                            if (msg.author.bot) continue;
+                            const matches = msg.content.match(linkRegex);
+                            if (matches) totalLinks += matches.length;
+                        }
+
+                        lastId = fetched.last().id;
+                    }
 
                     let hours = minHours;
                     if (totalLinks >= 30) hours = 3;
@@ -83,15 +105,7 @@ module.exports = {
             2
         );
 
-        // Evening Raid
-        scheduleRaid(
-            config.CHANNELS.EVENING_RAID,
-            "30 18 * * *",
-            `🌆 <@&${config.ROLES.ASSOCIATE}>\n\nGood evening associates!\n\nThe evening raid party has started.\nPlease share the link within 61 minutes.\n\nLinks shared after that will be removed without notice.\nRefer to rules for engagement policies.`,
-            config.TIMINGS.EVENING_RAID_DURATION,
-            config.TIMINGS.EVENING_RAID_REMINDER,
-            2
-        );
+
 
         // --- NEXUS ELITE DAILY BRIEFING (10 AM IST) ---
         const { getTrendingNews, getTrendingCoins, getTrendingSolanaCoins, getFearGreedIndex, getTopMovers } = require("../cryptoEngine");

@@ -22,16 +22,22 @@ client.once(readyEvent.name, (...args) => readyEvent.execute(...args));
 client.on(messageCreateEvent.name, (...args) => messageCreateEvent.execute(...args));
 client.on(guildMemberAddEvent.name, (...args) => guildMemberAddEvent.execute(...args));
 
+const logger = require("./services/logger");
+
 // Global Error Handlers
 process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
+  logger.error("Unhandled Rejection:", err);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
+  logger.error("Uncaught Exception:", err);
 });
 
-client.login(config.API.DISCORD_TOKEN);
+client.login(config.API.DISCORD_TOKEN).then(() => {
+  logger.log(`Bot logged in as ${client.user.tag}`);
+}).catch(err => {
+  logger.error("Login failed:", err);
+});
 
 // Start API Gateway
 startServer(client);

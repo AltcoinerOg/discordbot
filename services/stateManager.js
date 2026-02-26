@@ -6,6 +6,7 @@ const config = require("../config");
 const PERSONALITY_FILE = path.join(__dirname, "../personality.json");
 const MEMORY_FILE = path.join(__dirname, "../memorySummary.json");
 const WATCHLIST_FILE = path.join(__dirname, "../watchlist.json");
+const MODERATION_FILE = path.join(__dirname, "../moderationState.json");
 
 // In-memory state
 let personality = {};
@@ -21,6 +22,10 @@ let raidState = {
 let activeRequests = 0;
 let seenHeadlines = new Set();
 let watchlist = [];
+let moderationState = {
+    abuseStrikes: {},
+    tempBlockedUsers: {}
+};
 
 // Load data on startup
 function loadState() {
@@ -36,6 +41,10 @@ function loadState() {
         if (fs.existsSync(WATCHLIST_FILE)) {
             watchlist = JSON.parse(fs.readFileSync(WATCHLIST_FILE, "utf8"));
             console.log("Watchlist data loaded.");
+        }
+        if (fs.existsSync(MODERATION_FILE)) {
+            moderationState = JSON.parse(fs.readFileSync(MODERATION_FILE, "utf8"));
+            console.log("Moderation state loaded.");
         }
     } catch (err) {
         console.error("Error loading state files:", err);
@@ -76,7 +85,16 @@ function scheduleWatchlistSave() {
     }, config.TIMINGS.SAVE_TIMEOUT);
 }
 
-// Getters and Setters
+let moderationSaveTimeout = null;
+function scheduleModerationSave() {
+    if (moderationSaveTimeout) return;
+    moderationSaveTimeout = setTimeout(() => {
+        fs.writeFile(MODERATION_FILE, JSON.stringify(moderationState, null, 2), (err) => {
+            if (err) console.error("Error saving moderation state:", err);
+        });
+        moderationSaveTimeout = null;
+    }, config.TIMINGS.SAVE_TIMEOUT);
+}
 module.exports = {
     loadState,
     getPersonality: (guildId, userId) => {
@@ -138,5 +156,20 @@ module.exports = {
     updateWatchlist: (newList) => {
         watchlist = newList;
         scheduleWatchlistSave();
+    },
+    getModerationState: () => moderationState,
+    updateStrikes: (userId, data) => {
+        if (!moderationState.abuseStrikes) moderationState.abuseStrikes = {};
+        moderationState.abuseStrikes[userId] = data;
+        scheduleModerationSave();
+    },
+    updateBlocks: (userId, expiry) => {
+        if (!moderationState.tempBlockedUsers) moderationState.tempBlockedUsers = {};
+        if (expiry === null) {
+            delete moderationState.tempBlockedUsers[userId];
+        } else {
+            moderationState.tempBlockedUsers[userId] = expiry;
+        }
+        scheduleModerationSave();
     }
 };

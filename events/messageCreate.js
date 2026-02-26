@@ -25,15 +25,7 @@ module.exports = {
             return handleWatchlist(message, args);
         }
 
-        // 1. RAID LINK TRACKING
-        const raidState = stateManager.getRaidState();
-        if (raidState.active && message.channel.id === raidState.channelId) {
-            const linkRegex = /(https?:\/\/[^\s]+)/g;
-            const matches = message.content.match(linkRegex);
-            if (matches) {
-                stateManager.updateRaidState({ links: raidState.links + matches.length });
-            }
-        }
+
 
         // 2. MODERATION
         const modResult = handleModeration(message);

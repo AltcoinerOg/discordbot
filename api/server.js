@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const config = require("../config");
-const routes = require("./routes/index");
+const logger = require("../services/logger");
 
 /**
  * Starts the API Gateway server.
@@ -18,7 +18,7 @@ function startServer(client) {
 
     // --- Request Logger ---
     app.use((req, res, next) => {
-        console.log(`[API] ${req.method} ${req.path}`);
+        logger.log(`[API] ${req.method} ${req.path}`);
         next();
     });
 
@@ -32,13 +32,13 @@ function startServer(client) {
 
     // --- Global Error Handler ---
     app.use((err, req, res, next) => {
-        console.error("[API] Unhandled error:", err);
+        logger.error("[API] Unhandled error:", err);
         res.status(500).json({ error: "Internal Server Error" });
     });
 
     // --- Start Listening ---
     app.listen(port, () => {
-        console.log(`[API] Gateway running on http://localhost:${port}`);
+        logger.log(`[API] Gateway running on http://localhost:${port}`);
     });
 }
 
