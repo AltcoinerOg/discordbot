@@ -13,7 +13,10 @@ function startServer(client) {
     const port = config.API.API_PORT || 3000;
 
     // --- Middleware ---
-    app.use(cors());
+    app.use(cors({
+        origin: "*",
+        allowedHeaders: ["Content-Type", "x-api-secret"]
+    }));
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
@@ -24,10 +27,12 @@ function startServer(client) {
     });
 
     // --- Routes ---
+    app.get("/ping", (req, res) => res.json({ pong: true }));
     app.use("/", routes(client));
 
     // --- 404 Handler ---
     app.use((req, res) => {
+        logger.warn(`[API] 404 Not Found: ${req.method} ${req.path}`);
         res.status(404).json({ error: "Not Found" });
     });
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const config = require("../../config");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
+const logger = require("../../services/logger");
 
 // Setup express-rate-limit to prevent memory leaks and DDoS
 const apiRateLimit = rateLimit({
@@ -15,22 +16,27 @@ const apiRateLimit = rateLimit({
 
 // Middleware: Authenticate requests using secure hashed timing-safe comparison
 function authenticate(req, res, next) {
+    logger.log(`[AUTH] Attempt from ${req.ip}`);
     const providedSecret = req.headers["x-api-secret"];
     const expectedSecret = config.API.API_SECRET;
 
     if (!providedSecret) {
+        logger.warn(`[API] Auth Failed: No secret provided in headers.`);
         return res.status(401).json({ error: "Unauthorized: Missing API secret." });
     }
 
     try {
-        // Hash both secrets before comparison to prevent length-based timing attacks
         const providedHash = crypto.createHash("sha256").update(providedSecret).digest();
         const expectedHash = crypto.createHash("sha256").update(expectedSecret).digest();
 
         if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
+            logger.warn(`[API] Auth Failed: Invalid secret provided.`);
             return res.status(401).json({ error: "Unauthorized: Invalid API secret." });
         }
+
+        // logger.log(`[API] Auth Success.`); // Optional: Too noisy if kept on
     } catch (err) {
+        logger.error(`[API] Auth Error: ${err.message}`);
         return res.status(401).json({ error: "Unauthorized: Secret verification failed." });
     }
 
@@ -51,19 +57,35 @@ module.exports = (client) => {
     });
 
     /**
-     * GET /stats
-     * Public endpoint. Returns bot statistics.
+     * GET /admin/stats
+     * Protected endpoint. Returns detailed bot statistics.
      */
-    router.get("/stats", apiRateLimit, (req, res) => {
+    router.get("/admin/stats", apiRateLimit, authenticate, (req, res) => {
         if (!client.isReady()) {
             return res.status(503).json({ error: "Bot is not ready yet." });
         }
+
+        const stateManager = require("../../services/stateManager");
+        const raidState = stateManager.getRaidState();
+        const watchlist = stateManager.getWatchlist();
+        const modState = stateManager.getModerationState();
+
         res.json({
             tag: client.user.tag,
             id: client.user.id,
             guilds: client.guilds.cache.size,
             ping: client.ws.ping,
-            uptime: Math.floor(client.uptime / 1000), // in seconds
+            uptime: Math.floor(client.uptime / 1000),
+            raid: {
+                active: raidState.active,
+                links: raidState.links,
+                startedAt: raidState.startedAt
+            },
+            watchlist: watchlist.length,
+            moderation: {
+                strikes: Object.keys(modState.abuseStrikes || {}).length,
+                blocked: Object.keys(modState.tempBlockedUsers || {}).length
+            }
         });
     });
 

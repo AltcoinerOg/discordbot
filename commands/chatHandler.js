@@ -21,8 +21,8 @@ async function handleChat(message) {
     cooldown[guildId][userId] = now;
 
     // 2. STATE & MEMORY
-    const personalityData = stateManager.getPersonality(guildId, userId);
-    const userMemory = stateManager.getMemory(guildId, userId);
+    const personalityData = await stateManager.getPersonality(guildId, userId);
+    const userMemory = await stateManager.getMemory(guildId, userId);
 
     const userMessage = message.content
         .replace(`<@${message.client.user.id}>`, "")
@@ -38,8 +38,8 @@ async function handleChat(message) {
     for (const [id, user] of mentionedUsers) {
         if (id === config.API.CREATOR_ID) mentionedCreator = true;
 
-        const mContext = stateManager.getMemory(guildId, id);
-        const pContext = stateManager.getPersonality(guildId, id);
+        const mContext = await stateManager.getMemory(guildId, id);
+        const pContext = await stateManager.getPersonality(guildId, id);
         mentionedUsersContext.push({
             id,
             tag: user.tag,
@@ -66,10 +66,8 @@ async function handleChat(message) {
         userId
     });
 
-    // Update personality state (engine might have mutated it, ensure it's saved)
-    // Note: handlePersonality currently might mutate the object directly. 
-    // Ideally, we should refactor it to return updates, but for now we rely on reference.
-    stateManager.updatePersonality(guildId, userId, personalityData);
+    // Update personality state
+    await stateManager.updatePersonality(guildId, userId, personalityData);
 
     // 4. GENERATE RESPONSE
     try {
@@ -115,8 +113,8 @@ async function handleChat(message) {
             if (userMemory.recent.length > 6) {
                 const oldSummary = userMemory.summary;
                 const recent = userMemory.recent;
-                getMemorySummary(oldSummary, recent).then(newSummary => {
-                    stateManager.updateMemorySummary(guildId, userId, newSummary);
+                getMemorySummary(oldSummary, recent).then(async newSummary => {
+                    await stateManager.updateMemorySummary(guildId, userId, newSummary);
                 });
                 userMemory.recent = userMemory.recent.slice(-4);
             }

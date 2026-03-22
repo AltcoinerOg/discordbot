@@ -2,6 +2,11 @@ require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 const config = require("./config");
 const { startServer } = require("./api/server");
+const Sentry = require("@sentry/node");
+
+if (config.API.SENTRY_DSN) {
+  Sentry.init({ dsn: config.API.SENTRY_DSN });
+}
 
 // Events
 const readyEvent = require("./events/ready");

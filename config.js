@@ -15,9 +15,19 @@ module.exports = {
     // API Configuration
     API: {
         GROQ_KEY: process.env.GROQ_API_KEY,
+        OPENROUTER_KEY: process.env.OPENROUTER_KEY, // Secondary Fallback
+        GEMINI_KEY: process.env.GEMINI_KEY, // Visual Intelligence
+        SENTRY_DSN: process.env.SENTRY_DSN, // Observability
+        REDIS_URL: process.env.REDIS_URL, // Distributed State
+        PINECONE: {
+            KEY: process.env.PINECONE_API_KEY,
+            INDEX: process.env.PINECONE_INDEX,
+            ENVIRONMENT: process.env.PINECONE_ENVIRONMENT
+        },
         DISCORD_TOKEN: process.env.TOKEN,
         MAX_ACTIVE_REQUESTS: 4,
         GROQ_MODEL: "llama-3.3-70b-versatile",
+        FALLBACK_MODEL: "meta-llama/llama-3.1-8b-instruct:free",
         API_PORT: process.env.PORT || process.env.API_PORT || 3000,
         API_SECRET: process.env.API_SECRET || "changeme",
         MONGO_URI: process.env.MONGO_URI,

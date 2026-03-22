@@ -4,11 +4,16 @@ const UserState = require("../models/UserState");
 const SystemState = require("../models/SystemState");
 const logger = require("./logger");
 const { LRUCache } = require("lru-cache");
+const Redis = require("ioredis");
 
-// Set up LRU Caches for in-memory mappings to prevent memory leaks over time
+// Distributed State (Redis)
+const redis = config.API.REDIS_URL ? new Redis(config.API.REDIS_URL) : null;
+if (redis) logger.log("Redis Client Initialized for Distributed State.");
+
+// Local Fallback Caches (LRU)
 const personality = new LRUCache({ max: 500 });
 const memorySummary = new LRUCache({ max: 500 });
-const memory = new LRUCache({ max: 500 }); // Per-session active history
+const memory = new LRUCache({ max: 500 });
 let dailyTokens = 0; // Runtime tally, synced to DB periodically
 let raidState = {
     active: false,
@@ -133,25 +138,46 @@ function scheduleModerationSave() {
 
 module.exports = {
     loadState,
-    getPersonality: (guildId, userId) => {
-        const key = `${guildId}-${userId}`;
-        if (!personality.has(key)) {
-            personality.set(key, {
-                vibe: "normal",
-                energy: 0,
-                degenScore: 0,
-                emotionalScore: 0,
-                title: "New Spawn",
-                lastActive: Date.now()
-            });
+    getPersonality: async (guildId, userId) => {
+        const key = `persona:${guildId}:${userId}`;
+
+        // 1. Try Redis (Distributed)
+        if (redis) {
+            const cached = await redis.get(key);
+            if (cached) return JSON.parse(cached);
         }
-        return personality.get(key);
+
+        // 2. Try LRU (Local)
+        const localKey = `${guildId}-${userId}`;
+        if (personality.has(localKey)) return personality.get(localKey);
+
+        // 3. Fallback to Default
+        const defaultPersona = {
+            vibe: "normal",
+            energy: 0,
+            degenScore: 0,
+            emotionalScore: 0,
+            title: "New Spawn",
+            lastActive: Date.now()
+        };
+
+        personality.set(localKey, defaultPersona);
+        return defaultPersona;
     },
-    updatePersonality: (guildId, userId, data) => {
-        const key = `${guildId}-${userId}`;
-        const current = personality.get(key) || {};
+    updatePersonality: async (guildId, userId, data) => {
+        const localKey = `${guildId}-${userId}`;
+        const redisKey = `persona:${guildId}:${userId}`;
+
+        const current = (personality.get(localKey)) || {};
         const updated = { ...current, ...data };
-        personality.set(key, updated);
+
+        // Sync Local
+        personality.set(localKey, updated);
+
+        // Sync Redis (Expiry 24h)
+        if (redis) {
+            await redis.set(redisKey, JSON.stringify(updated), "EX", 86400);
+        }
 
         if (config.API.MONGO_URI) {
             UserState.findOneAndUpdate(
@@ -161,24 +187,41 @@ module.exports = {
             ).catch(err => logger.error("DB Personality Save Err:", err));
         }
     },
-    getMemory: (guildId, userId) => {
-        const key = `${guildId}-${userId}`;
-        if (!memory.has(key)) {
-            memory.set(key, {
-                summary: memorySummary.get(key) || "",
-                recent: []
-            });
-        }
-        return memory.get(key);
-    },
-    updateMemorySummary: (guildId, userId, summary) => {
-        const key = `${guildId}-${userId}`;
-        memorySummary.set(key, summary);
+    getMemory: async (guildId, userId) => {
+        const localKey = `${guildId}-${userId}`;
+        const redisKey = `mem:${guildId}:${userId}`;
 
-        const activeSesh = memory.get(key);
+        // 1. Try Redis
+        if (redis) {
+            const cached = await redis.get(redisKey);
+            if (cached) return JSON.parse(cached);
+        }
+
+        // 2. Try LRU
+        if (memory.has(localKey)) return memory.get(localKey);
+
+        const defaultMem = {
+            summary: (memorySummary.get(localKey)) || "",
+            recent: []
+        };
+        memory.set(localKey, defaultMem);
+        return defaultMem;
+    },
+    updateMemorySummary: async (guildId, userId, summary) => {
+        const localKey = `${guildId}-${userId}`;
+        const redisKey = `mem:${guildId}:${userId}`;
+
+        memorySummary.set(localKey, summary);
+
+        const activeSesh = memory.get(localKey);
         if (activeSesh) {
             activeSesh.summary = summary;
-            memory.set(key, activeSesh);
+            memory.set(localKey, activeSesh);
+
+            // Sync to Redis (Expiry 4h)
+            if (redis) {
+                await redis.set(redisKey, JSON.stringify(activeSesh), "EX", 14400);
+            }
         }
     },
     getRaidState: () => raidState,
@@ -198,8 +241,9 @@ module.exports = {
         }
     },
     getWatchlist: () => watchlist,
-    updateWatchlist: (newList) => {
+    updateWatchlist: async (newList) => {
         watchlist = newList;
+        if (redis) await redis.set("system:watchlist", JSON.stringify(newList));
         scheduleWatchlistSave();
     },
     getModerationState: () => moderationState,

@@ -8,7 +8,7 @@ const config = require("../config");
 const { handleCrypto } = require("../commands/cryptoHandler");
 const { handleChat } = require("../commands/chatHandler");
 const { handleNews, handleWatchlist } = require("../commands/newsHandler");
-const { getAutonomousReply } = require("../services/aiService");
+const { getAutonomousReply, analyzeImage } = require("../services/aiService");
 
 module.exports = {
     name: "messageCreate",
@@ -52,6 +52,18 @@ module.exports = {
         }
 
         if (intent === "ai") {
+            // Check for images
+            const hasImage = message.attachments.first()?.contentType?.startsWith("image/");
+            if (hasImage) {
+                const imageUrl = message.attachments.first().url;
+                try {
+                    await message.channel.sendTyping();
+                    const analysis = await analyzeImage(imageUrl, message.content.replace(`<@${message.client.user.id}>`, "").trim());
+                    return message.reply(`👁️ **Image Insight:**\n${analysis}`);
+                } catch (err) {
+                    console.error("Image Analysis Error:", err);
+                }
+            }
             return handleChat(message);
         }
 

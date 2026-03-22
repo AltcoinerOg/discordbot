@@ -1,4 +1,22 @@
 const config = require("../config");
+const winston = require("winston");
+
+// --- Structured Logging (Winston) ---
+const logger = winston.createLogger({
+    level: "info",
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
+    transports: [
+        new winston.transports.Console({
+            format: winston.format.combine(
+                winston.format.colorize(),
+                winston.format.simple()
+            )
+        })
+    ]
+});
 
 /**
  * A utility to redact sensitive secrets from strings before logging.
@@ -12,38 +30,21 @@ class SecureLogger {
         ].filter(Boolean);
     }
 
-    /**
-     * Redacts known secrets from a message or error stack.
-     * @param {string|Error} content 
-     * @returns {string}
-     */
     redact(content) {
-        let text = typeof content === "string" ? content : (content.stack || content.message || String(content));
-
+        let text = typeof content === "string" ? content : (content.stack || content.message || JSON.stringify(content));
         for (const secret of this.secrets) {
             if (secret && secret.length > 5) {
-                const escapedSecret = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(escapedSecret, 'g');
-                text = text.replace(regex, "[REDACTED]");
+                text = text.replace(new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), "[REDACTED]");
             }
         }
         return text;
     }
 
-    log(...args) {
-        const cleaned = args.map(arg => this.redact(arg));
-        console.log(...cleaned);
-    }
-
-    error(...args) {
-        const cleaned = args.map(arg => this.redact(arg));
-        console.error(...cleaned);
-    }
-
-    warn(...args) {
-        const cleaned = args.map(arg => this.redact(arg));
-        console.warn(...cleaned);
-    }
+    log(...args) { logger.info(args.map(a => this.redact(a)).join(" ")); }
+    error(...args) { logger.error(args.map(a => this.redact(a)).join(" ")); }
+    warn(...args) { logger.warn(args.map(a => this.redact(a)).join(" ")); }
 }
+
+module.exports = new SecureLogger();
 
 module.exports = new SecureLogger();

@@ -10,13 +10,32 @@ const parser = new Parser({
 const newsCache = {};
 const NEWS_CACHE_DURATION = 60000; // 60 seconds
 
-// ===== FETCH WITH TIMEOUT =====
-function fetchWithTimeout(promise, ms) {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Request timed out")), ms)
-  );
+// ===== FETCH WITH RETRY & TIMEOUT =====
+async function fetchWithRetry(url, options = {}, retries = 2, backoff = 1000) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
-  return Promise.race([promise, timeout]);
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      if (response.status === 429 && retries > 0) {
+        // Rate limited, wait and retry
+        const retryAfter = response.headers.get("retry-after") || backoff / 1000;
+        await new Promise(res => setTimeout(res, retryAfter * 1000));
+        return fetchWithRetry(url, options, retries - 1, backoff * 2);
+      }
+      throw new Error(`HTTP Error ${response.status}`);
+    }
+    return response;
+  } catch (error) {
+    if (retries > 0) {
+      await new Promise(res => setTimeout(res, backoff));
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    throw error;
+  }
 }
 
 // ===== GLOBAL NEWS RATE LIMIT =====
@@ -30,7 +49,7 @@ setInterval(() => {
 // ===== SEARCH COIN BY NAME =====
 async function searchCoin(query) {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`
     );
 
@@ -52,7 +71,7 @@ async function searchCoin(query) {
 // ===== GET FULL COIN DATA =====
 async function getCoinData(coinId) {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://api.coingecko.com/api/v3/coins/${coinId}`
     );
 
@@ -151,10 +170,7 @@ async function getCryptoNews(query) {
 
     for (const feed of feeds) {
       try {
-        const parsed = await fetchWithTimeout(
-          parser.parseURL(feed),
-          5000 // 5 second timeout
-        );
+        const parsed = await fetchWithRetry(feed).then(res => res.text()).then(txt => parser.parseString(txt));
 
 
         const filtered = parsed.items
@@ -210,7 +226,7 @@ async function getTrendingNews() {
     let allHeadlines = [];
     for (const feed of feeds) {
       try {
-        const parsed = await fetchWithTimeout(parser.parseURL(feed), 12000);
+        const parsed = await fetchWithRetry(feed).then(res => res.text()).then(txt => parser.parseString(txt));
         allHeadlines.push(...parsed.items.map(item => item.title));
       } catch (err) {
         console.error("Feed error:", feed);
@@ -226,7 +242,7 @@ async function getTrendingNews() {
 // ===== GET TRENDING COINS (COINGECKO) =====
 async function getTrendingCoins() {
   try {
-    const response = await fetch("https://api.coingecko.com/api/v3/search/trending");
+    const response = await fetchWithRetry("https://api.coingecko.com/api/v3/search/trending");
     const data = await response.json();
     return data.coins.map(c => `${c.item.name} (${c.item.symbol})`).slice(0, 5);
   } catch (error) {
@@ -240,7 +256,7 @@ async function getTrendingSolanaCoins() {
   try {
     // We use the Coingecko public search/trending and filter for SOL if possible, 
     // or just fetch general trending and label them.
-    const response = await fetch("https://api.coingecko.com/api/v3/search/trending");
+    const response = await fetchWithRetry("https://api.coingecko.com/api/v3/search/trending");
     const data = await response.json();
     return data.coins
       .filter(c => c.item.network_id === "solana" || c.item.symbol.toLowerCase().includes("sol"))
@@ -255,7 +271,7 @@ async function getTrendingSolanaCoins() {
 // ===== GET FEAR & GREED INDEX =====
 async function getFearGreedIndex() {
   try {
-    const response = await fetch("https://api.alternative.me/fng/");
+    const response = await fetchWithRetry("https://api.alternative.me/fng/");
     const data = await response.json();
     return {
       value: data.data[0].value,
@@ -271,7 +287,7 @@ async function getFearGreedIndex() {
 async function getTopMovers() {
   try {
     // We use markets endpoint with order to get gainers/losers
-    const response = await fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h");
+    const response = await fetchWithRetry("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h");
     const data = await response.json();
 
     const sortedByChange = [...data].sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h);
