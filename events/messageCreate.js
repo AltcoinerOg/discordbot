@@ -15,6 +15,11 @@ module.exports = {
     async execute(message) {
         if (message.author.bot) return;
 
+        // INCREDIBLY LOUD DEBUGGING TO FIND THE SILENCE
+        console.log(`[DEBUG] Received a message from ${message.author.tag}!`);
+        console.log(`[DEBUG] Content: "${message.content}"`);
+        console.log(`[DEBUG] Mentions: ${message.mentions.users.size}`);
+
         // Command processing
         const prefix = "!";
         const args = message.content.slice(prefix.length).trim().split(/ +/);
